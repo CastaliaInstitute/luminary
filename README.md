@@ -1,6 +1,6 @@
-# Lightbox
+# Luminary
 
-CastaliaInstitute project repository for **Lightbox**.
+CastaliaInstitute project repository for **Luminary**, an illuminated coastal shadow box.
 
 ## Status
 
@@ -17,7 +17,9 @@ Early development. This repository is the source of truth for the Lightbox proje
 
 ## Getting started
 
-Implementation details and local development instructions will be added here as the project stack is selected.
+The project page is published at [luminary.castalia.institute](https://luminary.castalia.institute).
+
+Open `cad/lightbox.scad` in OpenSCAD to inspect or export the current parametric model.
 
 ## Project principles
 
