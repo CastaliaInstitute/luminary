@@ -6,6 +6,8 @@ Print these parts at 0.20 mm layer height unless a slicer-specific strength
 test indicates otherwise:
 
 - `renders/stl/luminary-7in-p4-backplate.stl` — matte-black PLA rear plate.
+- `renders/stl/luminary-7in-p4-fit-check.stl` — 1 mm low-material test frame;
+  verify the actual P4 perimeter and corner holes before printing the backplate.
 - `renders/stl/luminary-front-door-reference.stl` — watertight 7 x 5 x 1 in
   woodworking reference for the hinged front door; do not print this wood part.
 - `renders/stl/nubble-basrelief-island.stl` — black PLA, 1.6 mm relief.
