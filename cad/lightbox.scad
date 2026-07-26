@@ -39,7 +39,7 @@ usb_bottom_edge_clearance = 3.0;
 
 // Printed silhouette panel
 silhouette_t = 0.80;
-panel_border = 5.0;
+panel_border = 4.0; // thin 4 x 6 in mounting frame
 scene_art = true;
 nozzle_d = 0.20;
 scene_base_layers = 4;       // 0.80 mm: visible face
@@ -50,6 +50,8 @@ rib_h = 6.0;
 magnet_d = 3.0;
 magnet_h = 1.0;
 magnet_edge = 7.0;
+magnet_pod_w = 8.0;
+magnet_pod_t = 2.0; // hidden depth; gives the 1 mm magnet a real pocket
 
 // Glass-door attachment hardware
 steel_square_w = 6.35; // 1/4 in
@@ -73,8 +75,18 @@ module rounded_box(size, radius = 3) {
 }
 
 module magnet_pocket(x, y) {
-    translate([x, y, silhouette_t - magnet_h - 0.01])
+    // Pocket opens on the rear of the hidden corner pod. A 0.8 mm face remains
+    // between magnet and glass, while the magnet stays invisible from the front.
+    translate([x, y, magnet_pod_t - magnet_h - 0.01])
         cylinder(d = magnet_d + 0.20, h = magnet_h + 0.02);
+}
+
+module corner_magnet_pod(x, y) {
+    difference() {
+        translate([x - magnet_pod_w / 2, y - magnet_pod_w / 2, silhouette_t])
+            cube([magnet_pod_w, magnet_pod_w, magnet_pod_t - silhouette_t]);
+        magnet_pocket(x, y);
+    }
 }
 
 module glass_steel_square(x, y) {
@@ -92,7 +104,7 @@ module glass_hardware() {
 
 module dark_silhouette_panel() {
     difference() {
-        // Full 4x6 panel with a thin visible border.
+        // Thin 4x6 mounting frame; the open center is filled only by scene art.
         translate([-panel_w / 2, -panel_h / 2, 0])
             cube([panel_w, panel_h, silhouette_t]);
 
@@ -100,10 +112,13 @@ module dark_silhouette_panel() {
         translate([-panel_w / 2 + panel_border, -panel_h / 2 + panel_border, -0.01])
             cube([panel_w - 2 * panel_border, panel_h - 2 * panel_border, silhouette_t + 0.02]);
 
-        for (x = [-panel_w / 2 + magnet_edge, panel_w / 2 - magnet_edge])
-            for (y = [-panel_h / 2 + magnet_edge, panel_h / 2 - magnet_edge])
-                magnet_pocket(x, y);
     }
+
+    // Four hidden rear pods carry the magnets that couple to the steel squares
+    // affixed at the glass-door corners.
+    for (x = [-panel_w / 2 + magnet_edge, panel_w / 2 - magnet_edge])
+        for (y = [-panel_h / 2 + magnet_edge, panel_h / 2 - magnet_edge])
+            corner_magnet_pod(x, y);
 
     // Photo-derived dark coastal scene. White structures are a separate part.
     if (scene_art)

@@ -20,14 +20,14 @@
 | Waveshare display outer envelope | 126.90 × 70.70 mm | Product reference image |
 | Display active area | 110.32 × 62.28 mm | Product reference image |
 | Waveshare PCB envelope | 118.50 × 64.50 mm | Product reference image |
-| Visible silhouette face | 0.8 mm | Design brief |
+| Visible silhouette/mounting frame | 4 × 6 in, 0.8 mm face | Design brief + mechanical revision |
 | Hidden rear ribs | ~2 mm deep | Design brief |
 | Magnet reference | 3 × 1 mm neodymium | Design brief |
 | Silhouette-to-display depth | 35 mm starting target | Design allocation, adjustable |
 | Printed rear plate | 177.8 × 127.0 mm (5 × 7 in) | New mechanical requirement |
 | Shallow rear registration land | 152.4 × 101.6 mm (4 × 6 in) | New mechanical requirement |
 | USB-C cable pass-throughs | 8 mm circular default, side + bottom-center | New mechanical requirement |
-| Silhouette magnet reference | 3 × 1 mm magnet pocket, 4 corners | Design brief |
+| Silhouette magnet reference | 3 × 1 mm magnet in 8 × 8 × 2 mm hidden corner pod, 4 corners | Design brief + mechanical revision |
 | Glass steel squares | 1/4 × 1/4 in, 4 corners | New mechanical requirement |
 
 ## Modeling assumptions
@@ -100,6 +100,8 @@ stays internal and the cable routes through the selected hole. Diameter and edge
 parameterized for the actual cable or grommet.
 
 The removable silhouette is retained separately by four 3 × 1 mm magnets in its corner
-pockets. Each magnet aligns to a 1/4 × 1/4 inch steel square bonded to the inside face of
-the glass door. `glass_hardware` renders those steel squares as a fit-check overlay; verify
-the final adhesive thickness and corner offsets on the actual glass before printing.
+pockets. The 0.8 mm visible mounting frame is backed only at the four corners by hidden
+8 × 8 × 2 mm pods, giving each magnet a viable rear pocket. Each magnet aligns to a
+1/4 × 1/4 inch steel square bonded to the inside face of the glass door. `glass_hardware`
+renders those steel squares as a fit-check overlay; verify final adhesive thickness and
+corner offsets on the actual glass before printing.
