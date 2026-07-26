@@ -23,6 +23,9 @@
 | Hidden rear ribs | ~2 mm deep | Design brief |
 | Magnet reference | 3 × 1 mm neodymium | Design brief |
 | Silhouette-to-display air gap | 2–3 mm | Design brief |
+| Printed rear plate | 177.8 × 127.0 mm (5 × 7 in) | New mechanical requirement |
+| Raised rear mounting insert | 152.4 × 101.6 mm (4 × 6 in) | New mechanical requirement |
+| Rear magnet reference | 3 × 1 mm pocket, 4 corners | New mechanical requirement |
 
 ## Modeling assumptions
 
@@ -34,11 +37,14 @@ following need physical verification before printing a final carrier or enclosur
 - PCB mounting-hole coordinates and connector keep-outs;
 - magnet polarity, steel-square placement, and pocket tolerances;
 - whether the 4 × 6 panel is centered or offset within the frame.
+- exact female USB-C adapter body, flange, screw pattern, and cable bend radius;
+- exact P4 PCB hole coordinates and connector keep-outs;
+- steel plate thickness, position, and polarity/spacing relative to the magnet pockets.
 
 ## Usage
 
 Open `cad/lightbox.scad` in OpenSCAD and set `part` to `assembly`, `silhouette`, `structures`,
-`carrier`, `display`, or `pcb`. Render with F6, then export the selected part as STL. The geometry is
+`backplate`, `carrier`, `display`, or `pcb`. Render with F6, then export the selected part as STL. The geometry is
 centered on the origin so it can be aligned with a future SVG-derived landscape silhouette.
 
 ## Silhouette composition
@@ -73,3 +79,11 @@ Current fit-check exports:
 - `renders/luminary-structures.stl`
 - `renders/luminary-carrier.stl`
 - `renders/luminary-display.stl`
+
+## Rear plate architecture
+
+The rear of the object is now a printed 5 × 7 plate. A raised 4 × 6 insert provides the
+mounting land for the P4/display assembly. Four rear-facing pockets accept magnets that
+mate with steel plates bonded to the inside back of the shadow-box frame. The default USB-C
+support is on the left side and is intentionally parameterized for a panel-mount female
+connector; measure the actual connector before releasing the part for print.

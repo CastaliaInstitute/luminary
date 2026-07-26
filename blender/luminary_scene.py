@@ -112,6 +112,10 @@ def build():
     # The physical display: sky and water are intentionally behind all relief.
     cube("display glass / sky", (0, 10.5, 62), (126.9, 3.5, 70.7), sky, bevel=2.5)
     cube("display ocean", (0, 8.5, 42), (122, 1.0, 27), ocean)
+    # Rear mechanical architecture: a full 5x7 printed plate with a raised
+    # 4x6 insert behind the P4/display stack.
+    cube("printed 5x7 rear plate", (0, 27, 62), (177.8, 5.0, 127.0), dark, bevel=3.0)
+    cube("raised 4x6 rear insert", (0, 23.5, 62), (152.4, 4.0, 101.6), rock, bevel=2.0)
     disk("display moon", (-37, 7.2, 78), 7, warm, depth=0.4)
     for x, z, sx in [(-22, 86, 15), (4, 88, 11), (28, 81, 17)]:
         bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, location=(x, 6.8, z))

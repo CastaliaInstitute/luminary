@@ -2,7 +2,7 @@
 // Units: millimetres. Reference: docs/reference-notes.md
 //
 // Render one part at a time by changing `part` below:
-//   "assembly", "silhouette", "structures", "carrier", "display", "pcb"
+//   "assembly", "silhouette", "structures", "backplate", "carrier", "display", "pcb"
 
 $fn = 64;
 
@@ -21,6 +21,21 @@ active_w = 110.32;
 active_h = 62.28;
 pcb_w = 118.50;
 pcb_h = 64.50;
+
+// Printed rear plate / mounting architecture
+backplate_t = 3.0;
+insert_t = 4.0;
+insert_border = 5.0;
+rear_wall = 2.5;
+rear_magnet_d = 3.2;
+rear_magnet_h = 1.2;
+rear_magnet_edge = 9.0;
+usb_side = "left"; // "left" or "right"
+usb_support_w = 14.0;
+usb_support_h = 10.0;
+usb_opening_w = 10.0;
+usb_opening_h = 5.0;
+usb_edge_clearance = 4.0;
 
 // Printed silhouette panel
 silhouette_t = 0.80;
@@ -98,6 +113,60 @@ module white_structures() {
             import("../assets/living-landscape-structures.svg");
 }
 
+module rear_magnet_pocket(x, y) {
+    // Pockets open on the rear face toward the steel plates in the frame.
+    translate([x, y, -0.01])
+        cylinder(d = rear_magnet_d + 0.25, h = rear_magnet_h + 0.02);
+}
+
+module p4_mount_standoff(x, y) {
+    translate([x, y, backplate_t + insert_t]) {
+        difference() {
+            cylinder(d = 7.0, h = 6.0);
+            translate([0, 0, -0.01]) cylinder(d = 3.2, h = 6.02);
+        }
+    }
+}
+
+module usb_c_side_support() {
+    side_x = usb_side == "left" ? -frame_outer_w / 2 + usb_support_w / 2 : frame_outer_w / 2 - usb_support_w / 2;
+    difference() {
+        translate([side_x, 0, backplate_t + insert_t / 2])
+            cube([usb_support_w, usb_support_h, insert_t], center = true);
+        translate([side_x, 0, backplate_t + insert_t / 2])
+            cube([usb_opening_w, usb_opening_h, insert_t + 0.2], center = true);
+    }
+}
+
+module rear_backplate() {
+    difference() {
+        // Full 5x7 plate, aligned with the shadow-box exterior.
+        translate([-frame_outer_w / 2, -frame_outer_h / 2, 0])
+            cube([frame_outer_w, frame_outer_h, backplate_t]);
+
+        for (x = [-frame_outer_w / 2 + rear_magnet_edge, frame_outer_w / 2 - rear_magnet_edge])
+            for (y = [-frame_outer_h / 2 + rear_magnet_edge, frame_outer_h / 2 - rear_magnet_edge])
+                rear_magnet_pocket(x, y);
+
+        // Side access opening for a panel-mount female USB-C connector.
+        side_x = usb_side == "left" ? -frame_outer_w / 2 + usb_edge_clearance : frame_outer_w / 2 - usb_edge_clearance;
+        translate([side_x, 0, backplate_t / 2])
+            cube([usb_opening_w, usb_opening_h, backplate_t + 0.2], center = true);
+    }
+
+    // Raised 4x6 insert: the P4/display carrier mounts above this boss.
+    translate([-panel_w / 2, -panel_h / 2, backplate_t])
+        rounded_box([panel_w, panel_h, insert_t], 3);
+
+    // Four PCB mounting points. Coordinates are based on the photo's corner-hole
+    // callouts and remain adjustable until the actual board is measured.
+    for (x = [-pcb_w / 2 + 3.75, pcb_w / 2 - 3.75])
+        for (y = [-pcb_h / 2 + 3.75, pcb_h / 2 - 3.75])
+            p4_mount_standoff(x, y);
+
+    usb_c_side_support();
+}
+
 module display_model() {
     color("#202124")
         rounded_box([display_w, display_h, 4.0], 3);
@@ -137,11 +206,13 @@ module assembly() {
     translate([0, 0, silhouette_t + display_gap]) display_model();
     translate([0, 0, silhouette_t + display_gap + 4.0 + 0.5]) carrier();
     translate([0, 0, silhouette_t + display_gap + 4.0 + 0.5 + carrier_t + pcb_standoff_h]) pcb_model();
+    translate([0, 0, silhouette_t + display_gap + 4.0 + 0.5 + carrier_t + pcb_standoff_h + 1.6]) rear_backplate();
 }
 
 if (part == "assembly") assembly();
 if (part == "silhouette") dark_silhouette_panel();
 if (part == "structures") white_structures();
+if (part == "backplate") rear_backplate();
 if (part == "carrier") carrier();
 if (part == "display") display_model();
 if (part == "pcb") pcb_model();

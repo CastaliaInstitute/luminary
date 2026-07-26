@@ -4,7 +4,7 @@ CastaliaInstitute project repository for **Luminary**, an illuminated coastal sh
 
 ## Status
 
-Early development. This repository is the source of truth for the Lightbox project.
+Early development. This repository is the source of truth for the Luminary project.
 
 ## Repository layout
 
