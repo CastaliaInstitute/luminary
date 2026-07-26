@@ -25,6 +25,7 @@
 | Hidden rear ribs | ~2 mm deep | Design brief |
 | Magnet reference | 3 × 1 mm neodymium | Design brief |
 | Silhouette-to-display depth | 20 mm target | Reduces off-axis parallax while retaining shadow depth |
+| Clear glass / mat opening | 114.3 × 88.9 mm (4.5 × 3.5 in) | Actual visible front aperture |
 | Printed rear plate | 177.8 × 127.0 mm (5 × 7 in) | New mechanical requirement |
 | Shallow rear registration land | 152.4 × 101.6 mm (4 × 6 in) | New mechanical requirement |
 | USB-C cable pass-throughs | 8 mm circular default, side + bottom-center | New mechanical requirement |

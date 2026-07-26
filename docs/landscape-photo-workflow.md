@@ -22,7 +22,7 @@ Record these three visual planes before processing:
 | --- | --- |
 | Sky and open water | LCD background |
 | Island / shore / architecture | Black relief plus optional white building insert |
-| Nearest rocks | Raised foreground silhouette |
+| Nearest rocks | Separate raised foreground silhouette |
 
 ## 2. Make the LCD background with AI fill
 
@@ -47,17 +47,17 @@ assets/display-<scene>-1280x720.png
 Resize/crop to exactly 1280 × 720 without moving the horizon unless the CAD review demands
 it. The display image should be the only source of sky and water.
 
-## 3. Make an AI tracing reference for the foreground
+## 3. Make AI tracing references for the island and foreground
 
-Generate a second reference from the original photo. This is **not** the final artwork; it
-is an aid for making a faithful vector silhouette.
+Generate a second reference from the original photo for the island and architecture only.
+This is **not** the final artwork; it is an aid for making a faithful vector silhouette.
 
 Prompt template:
 
 > Create a clean, source-faithful architectural tracing reference from this exact landscape
 > photograph. Do not redesign or beautify it. Preserve the photographed landform, relative
 > building sizes, horizon placement, and foreground rock contours. Remove sky, water, waves,
-> and foam. Make rock and land solid black; make buildings pure white; keep lighthouse lantern
+> and foam. Make the distant island and land solid black; make buildings pure white; keep lighthouse lantern
 > glazing open/transparent. Use a pure white background, crisp untextured forms, no gradients,
 > labels, or border.
 
@@ -70,11 +70,16 @@ assets/<scene>-silhouette-reference.png
 Reject a reference if it invents buildings, turns a low island into a mountain, merges open
 water into land, or changes the relative lighthouse/house scale.
 
+Generate a third reference for foreground rocks only. Exclude the distant island and preserve
+the original water gaps between boulders. This prevents foreground rocks from being lost when
+AI creates the island pass.
+
 ## 4. Trace printable silhouettes, not a bitmap
 
 Build SVGs from the reference using simple closed paths:
 
-- `living-landscape-photo-trace.svg`: black island and foreground rocks
+- `living-landscape-photo-trace.svg`: black island reference
+- `living-landscape-foreground.svg`: separate black foreground-rock reference
 - `living-landscape-structures.svg`: separate white structures
 
 Keep the three rules below.

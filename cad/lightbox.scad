@@ -14,6 +14,8 @@ frame_outer_h = 127.0; // 5 in
 shadow_box_depth = 50.8; // 2 in overall depth
 panel_w = 152.4; // 6 in nominal interior
 panel_h = 101.6; // 4 in nominal interior
+glass_visible_w = 114.3; // 4.5 in clear glass / mat opening
+glass_visible_h = 88.9;  // 3.5 in clear glass / mat opening
 
 // Waveshare ESP32-P4-WiFi6-Touch-LCD-5 reference dimensions
 display_w = 126.90;
@@ -158,8 +160,8 @@ module transparent_silhouette_carrier() {
         for (side = [-1, 1])
             linear_extrude(height = silhouette_carrier_t)
                 hull() {
-                    translate([side * (panel_w / 2 - panel_border - 0.2), 7]) circle(d = 0.6);
-                    translate([side * 59.7, 7]) circle(d = 0.6);
+                    translate([side * (panel_w / 2 - panel_border + 1.0), 7]) circle(d = 0.6);
+                    translate([side * 47.5, 7]) circle(d = 0.6);
                 }
 
         // Four hidden rear pods carry the magnets that couple to the steel squares.
@@ -173,9 +175,9 @@ module dark_silhouette_panel() {
     // Source-traced island and foreground boulders, bonded to the transparent
     // carrier rather than forced to grow visible side bridges.
     if (scene_art)
-        translate([-panel_w / 2 + panel_border, -panel_h / 2 + panel_border, silhouette_carrier_t])
-            scale([(panel_w - 2 * panel_border) / svg_field_w,
-                   (panel_h - 2 * panel_border) / svg_field_h, 1])
+        translate([-glass_visible_w / 2, -glass_visible_h / 2, silhouette_carrier_t])
+            scale([glass_visible_w / svg_field_w,
+                   glass_visible_h / svg_field_h, 1])
                 linear_extrude(height = nozzle_d * scene_base_layers)
                     import("../assets/living-landscape-photo-trace.svg");
 
@@ -184,9 +186,9 @@ module dark_silhouette_panel() {
 module white_structures() {
     // Print separately in white. The two narrow lantern mullions in the SVG
     // leave its centre open; that transparent window is lit by the display.
-    translate([-panel_w / 2 + panel_border, -panel_h / 2 + panel_border, silhouette_carrier_t])
-        scale([(panel_w - 2 * panel_border) / svg_field_w,
-               (panel_h - 2 * panel_border) / svg_field_h, 1])
+    translate([-glass_visible_w / 2, -glass_visible_h / 2, silhouette_carrier_t])
+        scale([glass_visible_w / svg_field_w,
+               glass_visible_h / svg_field_h, 1])
             linear_extrude(height = nozzle_d * scene_mid_layers)
                 import("../assets/living-landscape-structures.svg");
 }

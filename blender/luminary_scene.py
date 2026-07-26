@@ -228,6 +228,8 @@ def build():
     white = mat("matte white lighthouse", (1.0, 0.99, 0.94, 1), roughness=0.52,
                 emission=(0.42, 0.40, 0.34, 1), strength=1.0)
     frame = distressed_white_frame()
+    wood_mat = mat("warm wood mat", (0.48, 0.26, 0.12, 1), roughness=0.62,
+                   emission=(0.10, 0.045, 0.015, 1), strength=0.32)
     glass = clear_glass_material()
     hinge = mat("aged hinge metal", (0.14, 0.105, 0.065, 1), metallic=0.65, roughness=0.38)
     lcd_body = mat("LCD black bezel", (0.008, 0.012, 0.014, 1), roughness=0.30)
@@ -264,7 +266,14 @@ def build():
     cube("door bottom rail", (0, door_y, 5), (170, 5.0, 8), frame, bevel=1.6)
     cube("door left rail", (-81, door_y, 62), (8, 5.0, 114), frame, bevel=1.6)
     cube("door right rail", (81, door_y, 62), (8, 5.0, 114), frame, bevel=1.6)
-    cube("door glass", (0, door_y - 0.15, 62), (154, 0.6, 106), glass)
+    # The actual glass is 4.5 × 3.5 in. A warm wood mat hides the larger 4 × 6
+    # silhouette carrier and defines the true visible aperture.
+    mat_y = door_y - 2.7
+    cube("wood mat top", (0, mat_y, 109.45), (152.4, 1.6, 6.35), wood_mat)
+    cube("wood mat bottom", (0, mat_y, 14.55), (152.4, 1.6, 6.35), wood_mat)
+    cube("wood mat left", (-66.675, mat_y, 62), (19.05, 1.6, 88.9), wood_mat)
+    cube("wood mat right", (66.675, mat_y, 62), (19.05, 1.6, 88.9), wood_mat)
+    cube("door glass", (0, door_y - 3.6, 62), (114.3, 0.6, 88.9), glass)
     for z in (31, 93):
         bpy.ops.mesh.primitive_cylinder_add(vertices=24, radius=2.2, depth=11,
                                             location=(-85, door_y - 2.6, z))

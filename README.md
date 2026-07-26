@@ -31,6 +31,8 @@ For new scenes, follow the [landscape photo workflow](docs/landscape-photo-workf
 It defines the AI background-fill, source-faithful silhouette, SVG, print-validation, and
 off-axis display-alignment process.
 
+The first three-layer example is documented in the [Nubble source run](docs/nubble-source-run.md).
+
 ## Project principles
 
 - Keep the project understandable and easy to pick up.
