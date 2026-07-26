@@ -24,7 +24,7 @@
 | Magnet reference | 3 × 1 mm neodymium | Design brief |
 | Silhouette-to-display air gap | 2–3 mm | Design brief |
 | Printed rear plate | 177.8 × 127.0 mm (5 × 7 in) | New mechanical requirement |
-| Raised rear mounting insert | 152.4 × 101.6 mm (4 × 6 in) | New mechanical requirement |
+| Shallow rear registration land | 152.4 × 101.6 mm (4 × 6 in) | New mechanical requirement |
 | Silhouette magnet reference | 3 × 1 mm magnet pocket, 4 corners | Design brief |
 | Glass steel squares | 1/4 × 1/4 in, 4 corners | New mechanical requirement |
 
@@ -38,7 +38,7 @@ following need physical verification before printing a final carrier or enclosur
 - PCB mounting-hole coordinates and connector keep-outs;
 - magnet polarity, steel-square placement, and pocket tolerances;
 - whether the 4 × 6 panel is centered or offset within the frame.
-- exact female USB-C adapter body, flange, screw pattern, and cable bend radius;
+- exact P4 USB-C port positions, opening size, and cable bend radius;
 - exact P4 PCB hole coordinates and connector keep-outs;
 - steel plate thickness, position, and spacing relative to the silhouette magnet pockets.
 
@@ -83,11 +83,12 @@ Current fit-check exports:
 
 ## Rear plate architecture
 
-The rear of the object is now a printed 5 × 7 plate. A raised 4 × 6 insert provides the
-mounting land for the P4/display assembly. Four rear-facing pockets accept magnets that
+The rear of the object is now a printed 5 × 7 plate. A shallow 4 × 6 registration land keeps
+the display close to the frame back while providing a mounting datum for the P4/display
+assembly. Four rear-facing pockets accept magnets that
 mate with steel plates bonded to the inside back of the shadow-box frame. The default USB-C
-support is on the left side and is intentionally parameterized for a panel-mount female
-connector; measure the actual connector before releasing the part for print.
+access is a direct cutout through the left side of the printed back; its size is intentionally
+parameterized for the actual port positions and cable bend radius.
 
 The removable silhouette is retained separately by four 3 × 1 mm magnets in its corner
 pockets. Each magnet aligns to a 1/4 × 1/4 inch steel square bonded to the inside face of

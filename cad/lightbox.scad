@@ -24,18 +24,17 @@ pcb_h = 64.50;
 
 // Printed rear plate / mounting architecture
 backplate_t = 3.0;
-insert_t = 4.0;
+insert_t = 1.0; // shallow registration land; keeps the display close to the frame back
 insert_border = 5.0;
 rear_wall = 2.5;
 rear_magnet_d = 3.2;
 rear_magnet_h = 1.2;
 rear_magnet_edge = 9.0;
 usb_side = "left"; // "left" or "right"
-usb_support_w = 14.0;
-usb_support_h = 10.0;
-usb_opening_w = 10.0;
-usb_opening_h = 5.0;
-usb_edge_clearance = 4.0;
+usb_cutout_w = 18.0;
+usb_cutout_h = 12.0;
+usb_cutout_y = 0.0;
+usb_edge_clearance = 3.0;
 
 // Printed silhouette panel
 silhouette_t = 0.80;
@@ -148,17 +147,10 @@ module p4_mount_standoff(x, y) {
     }
 }
 
-module usb_c_side_support() {
-    side_x = usb_side == "left" ? -frame_outer_w / 2 + usb_support_w / 2 : frame_outer_w / 2 - usb_support_w / 2;
-    difference() {
-        translate([side_x, 0, backplate_t + insert_t / 2])
-            cube([usb_support_w, usb_support_h, insert_t], center = true);
-        translate([side_x, 0, backplate_t + insert_t / 2])
-            cube([usb_opening_w, usb_opening_h, insert_t + 0.2], center = true);
-    }
-}
-
 module rear_backplate() {
+    usb_cutout_x = usb_side == "left"
+        ? -frame_outer_w / 2 + usb_cutout_w / 2 - usb_edge_clearance
+        : frame_outer_w / 2 - usb_cutout_w / 2 + usb_edge_clearance;
     difference() {
         // Full 5x7 plate, aligned with the shadow-box exterior.
         translate([-frame_outer_w / 2, -frame_outer_h / 2, 0])
@@ -168,10 +160,11 @@ module rear_backplate() {
             for (y = [-frame_outer_h / 2 + rear_magnet_edge, frame_outer_h / 2 - rear_magnet_edge])
                 rear_magnet_pocket(x, y);
 
-        // Side access opening for a panel-mount female USB-C connector.
-        side_x = usb_side == "left" ? -frame_outer_w / 2 + usb_edge_clearance : frame_outer_w / 2 - usb_edge_clearance;
-        translate([side_x, 0, backplate_t / 2])
-            cube([usb_opening_w, usb_opening_h, backplate_t + 0.2], center = true);
+        // Direct side access opening for the P4's female USB-C ports.
+        // The opening is intentionally oversized until the actual connector
+        // positions and cable bend radius are measured.
+        translate([usb_cutout_x, usb_cutout_y, backplate_t / 2])
+            cube([usb_cutout_w, usb_cutout_h, backplate_t + 0.2], center = true);
     }
 
     // Raised 4x6 insert: the P4/display carrier mounts above this boss.
@@ -184,7 +177,6 @@ module rear_backplate() {
         for (y = [-pcb_h / 2 + 3.75, pcb_h / 2 - 3.75])
             p4_mount_standoff(x, y);
 
-    usb_c_side_support();
 }
 
 module display_model() {
