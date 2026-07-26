@@ -24,7 +24,7 @@
 | Inner mounting-frame edge | 2 mm tapered feather | Mechanical revision |
 | Hidden rear ribs | ~2 mm deep | Design brief |
 | Magnet reference | 3 × 1 mm neodymium | Design brief |
-| Silhouette-to-display depth | 35 mm starting target | Design allocation, adjustable |
+| Silhouette-to-display depth | 20 mm target | Reduces off-axis parallax while retaining shadow depth |
 | Printed rear plate | 177.8 × 127.0 mm (5 × 7 in) | New mechanical requirement |
 | Shallow rear registration land | 152.4 × 101.6 mm (4 × 6 in) | New mechanical requirement |
 | USB-C cable pass-throughs | 8 mm circular default, side + bottom-center | New mechanical requirement |
@@ -45,10 +45,11 @@ following need physical verification before printing a final carrier or enclosur
 - exact P4 PCB hole coordinates and connector keep-outs;
 - steel plate thickness, position, and spacing relative to the silhouette magnet pockets.
 
-The 2 in outer depth is now the controlling dimension. The model uses a 35 mm
-silhouette-to-screen depth, preserving roughly 15 mm for the display carrier, P4 PCB,
-rear plate, and clearance. This is a fit allocation, not proof of fit; confirm the tallest
-P4-side component before printing.
+The 2 in outer depth is now the controlling dimension. The model uses a 20 mm
+silhouette-to-screen depth, preserving roughly 30 mm for the display carrier, P4 PCB,
+rear plate, and clearance. This reduces the background's apparent shift when viewed at a
+slight angle. This is a fit allocation, not proof of fit; confirm the tallest P4-side
+component before printing.
 
 ## Usage
 

@@ -67,8 +67,9 @@ show_glass_hardware = true;
 // Carrier and stack-up assumptions; verify against the actual frame.
 carrier_t = 3.0;
 carrier_clearance = 1.5;
-// 35 mm leaves an ~15 mm rear electronics envelope inside a 2 in box.
-display_gap = 35.0;
+// 20 mm preserves shadow depth while reducing off-axis display parallax.
+// It leaves roughly 30 mm for the rear electronics envelope.
+display_gap = 20.0;
 pcb_standoff_h = 2.5;
 
 module rounded_box(size, radius = 3) {
