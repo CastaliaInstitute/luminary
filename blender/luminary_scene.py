@@ -39,6 +39,29 @@ def mat(name, color, metallic=0.0, roughness=0.55, emission=None, strength=0.0):
     return m
 
 
+def distressed_white_frame():
+    """Warm white painted wood with subtle gray wear variation."""
+    m = mat("distressed white painted frame", (0.78, 0.75, 0.67, 1), roughness=0.72,
+            emission=(0.035, 0.03, 0.022, 1), strength=0.12)
+    nodes = m.node_tree.nodes
+    links = m.node_tree.links
+    bsdf = nodes.get("Principled BSDF")
+    noise = nodes.new("ShaderNodeTexNoise")
+    noise.inputs["Scale"].default_value = 8.0
+    noise.inputs["Detail"].default_value = 5.0
+    noise.inputs["Roughness"].default_value = 0.78
+    ramp = nodes.new("ShaderNodeValToRGB")
+    ramp.color_ramp.elements[0].position = 0.28
+    ramp.color_ramp.elements[0].color = (0.38, 0.35, 0.29, 1)
+    ramp.color_ramp.elements[1].position = 0.62
+    ramp.color_ramp.elements[1].color = (1.0, 0.97, 0.88, 1)
+    links.new(noise.outputs["Fac"], ramp.inputs["Fac"])
+    links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])
+    bsdf.inputs["Emission Color"].default_value = (0.42, 0.39, 0.32, 1)
+    bsdf.inputs["Emission Strength"].default_value = 0.45
+    return m
+
+
 def cube(name, loc, scale, material, bevel=0.0):
     bpy.ops.mesh.primitive_cube_add(location=loc)
     ob = bpy.context.object
@@ -102,8 +125,7 @@ def build():
                emission=(0.025, 0.035, 0.034, 1), strength=0.25)
     white = mat("matte white lighthouse", WHITE, roughness=0.75,
                 emission=(0.12, 0.11, 0.09, 1), strength=0.35)
-    frame = mat("walnut shadow-box frame", (0.11, 0.075, 0.05, 1), roughness=0.52,
-                emission=(0.025, 0.014, 0.008, 1), strength=0.2)
+    frame = distressed_white_frame()
     sky = mat("animated sky display", SKY, roughness=0.35, emission=SKY, strength=0.35)
     ocean = mat("animated ocean display", OCEAN, roughness=0.28, emission=OCEAN, strength=0.5)
     warm = mat("lighthouse beacon", GLOW, roughness=0.2, emission=GLOW, strength=5.0)
