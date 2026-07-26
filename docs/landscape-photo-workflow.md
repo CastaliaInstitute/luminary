@@ -71,8 +71,9 @@ Reject a reference if it invents buildings, turns a low island into a mountain, 
 water into land, or changes the relative lighthouse/house scale.
 
 Generate a third reference for foreground rocks only. Exclude the distant island and preserve
-the original water gaps between boulders. This prevents foreground rocks from being lost when
-AI creates the island pass.
+the original water gaps between boulders. If the source has a wave striking a middle rock,
+make that rock a separate fourth shallow layer. This prevents foreground rocks or the
+breaker-rock target from being lost when AI creates the island pass.
 
 ## 4. Trace printable silhouettes, not a bitmap
 

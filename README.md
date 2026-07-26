@@ -32,6 +32,8 @@ It defines the AI background-fill, source-faithful silhouette, SVG, print-valida
 off-axis display-alignment process.
 
 The first three-layer example is documented in the [Nubble source run](docs/nubble-source-run.md).
+Its exported meshes are in `renders/stl/nubble-*.stl`, with the corresponding actual-STL
+Blender render at `renders/nubble-concept.png`.
 
 ## Project principles
 

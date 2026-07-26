@@ -18,6 +18,24 @@ STL_DIR = os.path.join(ROOT, "renders", "stl")
 SILHOUETTE_CARRIER_STL = os.path.join(STL_DIR, "luminary-silhouette-carrier.stl")
 SILHOUETTE_STL = os.path.join(STL_DIR, "luminary-silhouette.stl")
 STRUCTURES_STL = os.path.join(STL_DIR, "luminary-structures.stl")
+SCENE_VARIANT = os.environ.get("LUMINARY_SCENE", "luminary")
+
+# Nubble uses the three user-approved AI-separated masks as distinct opaque
+# parts.  The generated LCD image remains the sky-and-sea background.
+if SCENE_VARIANT == "nubble":
+    DISPLAY_BACKGROUND = os.path.join(ROOT, "assets", "display-nubble-1280x720.png")
+    PRINTED_PARTS = [
+        ("hidden magnetic frame", os.path.join(STL_DIR, "nubble-magnetic-frame.stl"), "carrier"),
+        ("Nubble island layer", os.path.join(STL_DIR, "nubble-island-layer.stl"), "dark"),
+        ("Nubble breaker-rock layer", os.path.join(STL_DIR, "nubble-breaker-layer.stl"), "rock"),
+        ("Nubble foreground-rock layer", os.path.join(STL_DIR, "nubble-foreground-layer.stl"), "dark"),
+    ]
+else:
+    PRINTED_PARTS = [
+        ("clear PETG silhouette carrier", SILHOUETTE_CARRIER_STL, "carrier"),
+        ("black printed silhouette relief", SILHOUETTE_STL, "dark"),
+        ("white printed lighthouse insert", STRUCTURES_STL, "white"),
+    ]
 os.makedirs(OUT, exist_ok=True)
 
 # Palette
@@ -247,11 +265,10 @@ def build():
     # 4x6 registration land behind the P4/display stack.
     cube("printed 5x7 rear plate", (0, 49.3, 62), (177.8, 3.0, 127.0), dark, bevel=3.0)
     cube("shallow 4x6 rear registration land", (0, 46.8, 62), (152.4, 1.0, 101.6), rock, bevel=1.0)
-    # Actual printable CAD parts, exported from cad/lightbox.scad. They share
-    # the same origin and stack exactly as they will in the physical assembly.
-    import_print_stl("clear PETG silhouette carrier", SILHOUETTE_CARRIER_STL, clear_carrier, (0, 5.0, 62))
-    import_print_stl("black printed silhouette relief", SILHOUETTE_STL, dark, (0, 5.0, 62))
-    import_print_stl("white printed lighthouse insert", STRUCTURES_STL, white, (0, 5.0, 62))
+    # Import the exact printable meshes, never render-only silhouette proxies.
+    materials = {"carrier": clear_carrier, "dark": dark, "rock": rock, "white": white}
+    for name, filepath, material in PRINTED_PARTS:
+        import_print_stl(name, filepath, materials[material], (0, 5.0, 62))
 
     # Frame and glass. The frame is intentionally oversized around the nominal 6x4 opening.
     cube("frame top", (0, 25.4, 116), (178, 50.8, 11), frame, bevel=2.5)
@@ -339,11 +356,12 @@ def build():
     scene.render.resolution_y = 600
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "PNG"
-    scene.render.filepath = os.path.join(OUT, "luminary-concept.png")
+    output_name = "nubble-concept" if SCENE_VARIANT == "nubble" else "luminary-concept"
+    scene.render.filepath = os.path.join(OUT, output_name + ".png")
     scene.render.film_transparent = False
     scene.view_settings.look = "AgX - Medium High Contrast"
     scene.render.image_settings.color_mode = "RGBA"
-    bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, "luminary-concept.blend"))
+    bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, output_name + ".blend"))
     bpy.ops.render.render(write_still=True)
 
 
