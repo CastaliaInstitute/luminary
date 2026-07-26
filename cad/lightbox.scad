@@ -2,7 +2,7 @@
 // Units: millimetres. Reference: docs/reference-notes.md
 //
 // Render one part at a time by changing `part` below:
-//   "assembly", "silhouette", "structures", "glass_hardware", "backplate", "carrier", "display", "pcb"
+//   "assembly", "preview", "silhouette", "silhouette_carrier", "structures", "glass_hardware", "backplate", "carrier", "display", "pcb"
 
 $fn = 64;
 
@@ -39,13 +39,15 @@ usb_bottom_edge_clearance = 3.0;
 
 // Printed silhouette panel
 silhouette_t = 0.80;
+silhouette_carrier_t = 0.40; // two 0.20 mm clear-filament layers behind all art
 glass_rabbet_margin = 8.0; // hidden by the door's glass-mounting margin
 panel_border = glass_rabbet_margin;
+tapered_edge_w = 2.0; // final portion of mount frame feathered toward clear window
 scene_art = true;
 nozzle_d = 0.20;
 scene_base_layers = 4;       // 0.80 mm: visible face
-scene_mid_layers = 6;        // 1.20 mm: focal structures
-scene_foreground_layers = 8; // 1.60 mm: rocks and surf
+scene_mid_layers = 6;        // 1.20 mm: white architecture and middle shoreline
+scene_foreground_layers = 8; // 1.60 mm: dark foreground rocks
 rib_t = 2.0;
 rib_h = 6.0;
 magnet_d = 3.0;
@@ -86,10 +88,35 @@ module magnet_pocket(x, y) {
 
 module corner_magnet_pod(x, y) {
     difference() {
-        translate([x - magnet_pod_w / 2, y - magnet_pod_w / 2, silhouette_t])
-            cube([magnet_pod_w, magnet_pod_w, magnet_pod_t - silhouette_t]);
+        // Overlap the carrier by 0.10 mm; coplanar contact is not a printable union.
+        translate([x - magnet_pod_w / 2, y - magnet_pod_w / 2, silhouette_carrier_t - 0.10])
+            cube([magnet_pod_w, magnet_pod_w, magnet_pod_t - silhouette_carrier_t + 0.10]);
         magnet_pocket(x, y);
     }
+}
+
+module frame_ring_2d(outer_w, outer_h, inner_w, inner_h) {
+    difference() {
+        square([outer_w, outer_h], center = true);
+        square([inner_w, inner_h], center = true);
+    }
+}
+
+module tapered_mount_frame(height = silhouette_t) {
+    // Rigid outer portion: hidden beneath the door rabbet and strong enough to
+    // carry the corner pods.
+    linear_extrude(height = height)
+        frame_ring_2d(panel_w, panel_h,
+                      panel_w - 2 * (panel_border - tapered_edge_w),
+                      panel_h - 2 * (panel_border - tapered_edge_w));
+
+    // The final 2 mm toward the clear window feathers away instead of creating
+    // a hard visible frame edge.
+    linear_extrude(height = height, scale = 0.94)
+        frame_ring_2d(panel_w - 2 * (panel_border - tapered_edge_w),
+                      panel_h - 2 * (panel_border - tapered_edge_w),
+                      panel_w - 2 * panel_border,
+                      panel_h - 2 * panel_border);
 }
 
 module glass_steel_square(x, y) {
@@ -105,54 +132,58 @@ module glass_hardware() {
             glass_steel_square(x, y);
 }
 
-module dark_silhouette_panel() {
-    difference() {
-    // Thin 4x6 mounting frame, hidden behind the door's glass rabbet; only the
-    // clear inner window is intended to remain visible.
-        translate([-panel_w / 2, -panel_h / 2, 0])
-            cube([panel_w, panel_h, silhouette_t]);
+module transparent_silhouette_carrier() {
+    // Clear carrier is deliberately only a hidden rabbet ring—not a full 4x6
+    // sheet. The photograph-derived island reaches the side margins itself.
+    union() {
+        // A simple closed ring is more reliable than the former coplanar taper.
+        linear_extrude(height = silhouette_carrier_t)
+            frame_ring_2d(panel_w, panel_h,
+                          panel_w - 2 * panel_border,
+                          panel_h - 2 * panel_border);
 
-        // Recess behind the border. This leaves the visible face intact.
-        translate([-panel_w / 2 + panel_border, -panel_h / 2 + panel_border, -0.01])
-            cube([panel_w - 2 * panel_border, panel_h - 2 * panel_border, silhouette_t + 0.02]);
+        // Two hairline supports retain otherwise isolated foreground boulders.
+        // They terminate under dark rock and remain visually absent over water.
+        for (x = [-10, 34])
+            linear_extrude(height = silhouette_carrier_t)
+                hull() {
+                    translate([x, -panel_h / 2 + panel_border + 0.2]) circle(d = 0.6);
+                translate([x, -23]) circle(d = 0.6);
+            }
 
+        // Island no longer stretches across the opening. These two short clear
+        // ties terminate behind its left/right rock shelf and disappear into
+        // the rabbet ring.
+        for (side = [-1, 1])
+            linear_extrude(height = silhouette_carrier_t)
+                hull() {
+                    translate([side * (panel_w / 2 - panel_border - 0.2), 7]) circle(d = 0.6);
+                    translate([side * 59.7, 7]) circle(d = 0.6);
+                }
+
+        // Four hidden rear pods carry the magnets that couple to the steel squares.
+        for (x = [-panel_w / 2 + magnet_edge, panel_w / 2 - magnet_edge])
+            for (y = [-panel_h / 2 + magnet_edge, panel_h / 2 - magnet_edge])
+                corner_magnet_pod(x, y);
     }
+}
 
-    // Four hidden rear pods carry the magnets that couple to the steel squares
-    // affixed at the glass-door corners.
-    for (x = [-panel_w / 2 + magnet_edge, panel_w / 2 - magnet_edge])
-        for (y = [-panel_h / 2 + magnet_edge, panel_h / 2 - magnet_edge])
-            corner_magnet_pod(x, y);
-
-    // Photo-derived dark coastal scene. White structures are a separate part.
+module dark_silhouette_panel() {
+    // Source-traced island and foreground boulders, bonded to the transparent
+    // carrier rather than forced to grow visible side bridges.
     if (scene_art)
-        translate([-panel_w / 2 + panel_border, -panel_h / 2 + panel_border, 0])
+        translate([-panel_w / 2 + panel_border, -panel_h / 2 + panel_border, silhouette_carrier_t])
             scale([(panel_w - 2 * panel_border) / svg_field_w,
                    (panel_h - 2 * panel_border) / svg_field_h, 1])
                 linear_extrude(height = nozzle_d * scene_base_layers)
-                    import("../assets/living-landscape-silhouette.svg");
+                    import("../assets/living-landscape-photo-trace.svg");
 
-    // Raised foreground gives the rocks a stronger shadow line. Water and surf
-    // remain open so the display can render motion and changing light.
-    if (scene_art)
-        translate([-panel_w / 2 + panel_border, -panel_h / 2 + panel_border, nozzle_d * scene_base_layers])
-            scale([(panel_w - 2 * panel_border) / svg_field_w,
-                   (panel_h - 2 * panel_border) / svg_field_h, 1])
-                linear_extrude(height = nozzle_d * scene_foreground_layers)
-                    import("../assets/living-landscape-foreground.svg");
-
-    // Minimal hidden ribs to stiffen the panel. Replace with the SVG-derived
-    // landscape silhouette as the scene geometry is designed.
-    for (x = [-panel_w / 2 + panel_border, panel_w / 2 - panel_border - rib_t])
-        translate([x, -panel_h / 2 + panel_border, silhouette_t])
-            cube([rib_t, panel_h - 2 * panel_border, rib_h]);
-    for (y = [-panel_h / 2 + panel_border, panel_h / 2 - panel_border - rib_t])
-        translate([-panel_w / 2 + panel_border, y, silhouette_t])
-            cube([panel_w - 2 * panel_border, rib_t, rib_h]);
 }
 
 module white_structures() {
-    translate([-panel_w / 2 + panel_border, -panel_h / 2 + panel_border, silhouette_t])
+    // Print separately in white. The two narrow lantern mullions in the SVG
+    // leave its centre open; that transparent window is lit by the display.
+    translate([-panel_w / 2 + panel_border, -panel_h / 2 + panel_border, silhouette_carrier_t])
         scale([(panel_w - 2 * panel_border) / svg_field_w,
                (panel_h - 2 * panel_border) / svg_field_h, 1])
             linear_extrude(height = nozzle_d * scene_mid_layers)
@@ -244,6 +275,7 @@ module carrier() {
 
 module assembly() {
     // Front-to-back stack: dark silhouette, white structures, display, carrier, PCB.
+    color([0.82, 0.94, 1.00, 0.22]) transparent_silhouette_carrier();
     color("#161616") dark_silhouette_panel();
     if (show_glass_hardware) color("#777777") glass_hardware();
     color("#f1eee4") white_structures();
@@ -254,8 +286,18 @@ module assembly() {
     translate([0, 0, shadow_box_depth - backplate_t]) rear_backplate();
 }
 
+// Front-on engineering preview of the actual two-colour printable pieces.
+// This deliberately excludes the display and frame so the landform can be judged.
+module silhouette_preview() {
+    color([0.82, 0.94, 1.00, 0.22]) transparent_silhouette_carrier();
+    color("#202020") dark_silhouette_panel();
+    color("#f5f3ea") white_structures();
+}
+
 if (part == "assembly") assembly();
+if (part == "preview") silhouette_preview();
 if (part == "silhouette") dark_silhouette_panel();
+if (part == "silhouette_carrier") transparent_silhouette_carrier();
 if (part == "structures") white_structures();
 if (part == "glass_hardware") glass_hardware();
 if (part == "backplate") rear_backplate();

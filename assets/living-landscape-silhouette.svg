@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Reference-derived silhouette, sized to the 142.4 x 91.6 mm panel field. -->
+<!-- Far, light-gray elevation band derived from the lighthouse photo / generated trace.
+     It deliberately runs into both frame edges: this is structural, not a loose cutout. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="142.4mm" height="91.6mm" viewBox="0 0 142.4 91.6">
-  <g fill="#000000">
-    <path d="M0 48 C12 44 22 43 31 44 C42 43 54 40 65 41 C78 39 91 41 103 43 C117 42 130 45 142.4 48 L142.4 58 L0 58 Z"/>
-    <path d="M0 53 C17 50 25 51 39 49 C53 47 65 48 79 47 C97 47 111 50 126 49 C134 49 138 50 142.4 51 L142.4 62 L0 62 Z"/>
-  </g>
+  <path fill="#000" d="M0 51.2 L7 51.2 L12 49.2 L17 47.3 L22 46.2
+    L28 45.2 L34 45 L40 44.2 L46 43.8 L51 42.6 L56 42.8 L61 42.2
+    L66 42.5 L71 42.2 L76 41.6 L81 42.2 L86 43.5 L91 43.8 L96 45.3
+    L101 45.5 L106 47 L111 48.2 L116 50.5 L121 51.2 L126 53.7
+    L131 55.2 L136 57.1 L142.4 57.8 L142.4 64 L0 64 Z"/>
 </svg>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Charcoal foreground layer: extra relief only, with open water above it. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="142.4mm" height="91.6mm" viewBox="0 0 142.4 91.6">
+  <path fill="#000" d="M0 77 L4 78 L9 75.5 L14 74.6 L19 75.2 L24 73.7
+    L29 75.5 L34 77.3 L39 82 L44 85.5 L48 87 L53 85.8
+    L58 84.2 L63 85.2 L68 84.8 L73 86 L78 87 L83 88.5
+    L88 90.3 L94 89.7 L100 88 L106 89 L112 87.5 L118 88.6
+    L123 87.8 L128 86.4 L133 87.6 L138 89.4 L142.4 90.2
+    L142.4 91.6 L0 91.6 Z"/>
+</svg>

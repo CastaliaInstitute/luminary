@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Foreground rocks and surf layer; same 142.4 x 91.6 mm panel field. -->
+<!-- Nearest shoreline shelf. It overlaps the far band and reaches both sides,
+     giving the 0.2 mm-nozzle relief a continuous printed load path. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="142.4mm" height="91.6mm" viewBox="0 0 142.4 91.6">
-  <g fill="#000000">
-    <path d="M0 72 L11 66 L24 69 L34 78 L39 91.6 L0 91.6 Z"/>
-    <path d="M22 91.6 L28 78 L39 72 L51 75 L61 91.6 Z"/>
-    <path d="M91 91.6 L100 79 L112 76 L123 81 L142.4 78 L142.4 91.6 Z"/>
-    <!-- water and surf are intentionally omitted; the display renders them -->
-  </g>
+  <path fill="#000" d="M0 63 L5 63.2 L10 64.5 L16 64.2 L23 65.7 L29 66.4
+    L36 67.3 L42 68.5 L48 69.8 L54 71.2 L59 70.5 L65 72.2
+    L70 73.5 L75 72.7 L81 74.4 L87 75.3 L92 77 L98 77.8
+    L104 79.8 L110 80.4 L116 82.2 L122 83.5 L128 85.4
+    L134 86.5 L142.4 87.8 L142.4 91.6 L0 91.6 Z"/>
 </svg>

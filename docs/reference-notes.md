@@ -21,6 +21,7 @@
 | Display active area | 110.32 × 62.28 mm | Product reference image |
 | Waveshare PCB envelope | 118.50 × 64.50 mm | Product reference image |
 | Silhouette mounting frame | 4 × 6 in, 0.8 mm face, hidden under 8 mm glass rabbet | Design brief + mechanical revision |
+| Inner mounting-frame edge | 2 mm tapered feather | Mechanical revision |
 | Hidden rear ribs | ~2 mm deep | Design brief |
 | Magnet reference | 3 × 1 mm neodymium | Design brief |
 | Silhouette-to-display depth | 35 mm starting target | Design allocation, adjustable |
@@ -57,17 +58,18 @@ centered on the origin so it can be aligned with a future SVG-derived landscape 
 
 ## Silhouette composition
 
-The added SVG is a first-pass silhouette interpretation of the supplied coastal photograph,
-not a pixel trace. It retains the low island and larger foreground rocks, while the separate
-structures layer retains the lighthouse and cottages. Sky, water, and surf are intentionally
-omitted so the display can provide those elements and their animation.
+`assets/lighthouse-silhouette-source-v3.png` is the latest AI-assisted, source-preserving
+tracing reference. `assets/living-landscape-photo-trace.svg` is its Potrace-derived black
+relief used by the CAD: compact island, separated foreground boulders, and modest lighthouse
+scale rather than the earlier abstract trace. Sky, water, and surf are intentionally omitted
+so the display can provide those elements and their animation.
 
 ## Relief strategy
 
-The silhouette is designed around a 0.2 mm nozzle: the base scene is 4 layers (0.8 mm),
-and the foreground rocks are raised another 8 layers (1.6 mm total). The lighthouse and
-cottage insert is a separate white-print part at 6 layers (1.2 mm). This keeps every thickness
-aligned to whole nozzle-width layer increments.
+The silhouette is designed around a 0.2 mm nozzle: the source-traced black scene is 4 layers
+(0.8 mm) and bonds to the transparent carrier. The lighthouse and cottage insert is a
+separate white-print part at 6 layers (1.2 mm). The lantern center is intentionally open,
+allowing the display image to show through it.
 
 ## Render handoff
 
@@ -83,9 +85,15 @@ reserves the glass-door layer.
 
 Current fit-check exports:
 
-- `renders/luminary-silhouette.stl`
-- `renders/luminary-structures.stl`
-- `renders/luminary-carrier.stl`
+- `renders/stl/luminary-backplate.stl` — printed 5 × 7 rear plate
+- `renders/stl/luminary-display-carrier.stl` — P4 display carrier
+- `renders/stl/luminary-silhouette-carrier.stl` — clear hidden ring, magnet pods, and support traces
+- `renders/stl/luminary-silhouette.stl` — black source-derived island and foreground rocks
+- `renders/stl/luminary-structures.stl` — white lighthouse and building insert
+
+All five were exported from `cad/lightbox.scad` with OpenSCAD and checked as non-empty
+ASCII STL meshes. The silhouette carrier is deliberately a ring-and-trace design; it is
+not a full clear 4 × 6 panel.
 - `renders/luminary-display.stl`
 
 ## Rear plate architecture
@@ -100,8 +108,10 @@ stays internal and the cable routes through the selected hole. Diameter and edge
 parameterized for the actual cable or grommet.
 
 The removable silhouette is retained separately by four 3 × 1 mm magnets in its corner
-pockets. The 0.8 mm mounting frame and the 8 × 8 × 2 mm corner pods are hidden beneath
-an 8 mm glass-mounting rabbet, leaving only the image-derived scene visible in the clear
-window. Each magnet aligns to a 1/4 × 1/4 inch steel square bonded to the inside face of
+pockets. Its clear carrier is a 0.4 mm (two-layer, 0.2 mm nozzle) perimeter ring hidden
+under the 8 mm glass-mounting rabbet, plus two 0.6 mm clear support traces behind isolated
+foreground boulders—not a full 4 × 6 sheet. The source-traced island reaches the side
+margins directly. Clear PLA is acceptable for these traces; clear PETG generally finishes
+more transparent. Each magnet aligns to a 1/4 × 1/4 inch steel square bonded to the inside face of
 the glass door. `glass_hardware` renders those steel squares as a fit-check overlay; verify
 final adhesive thickness and corner offsets on the actual glass before printing.

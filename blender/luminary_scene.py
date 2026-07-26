@@ -13,6 +13,11 @@ from mathutils import Vector
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "renders")
+DISPLAY_BACKGROUND = os.path.join(ROOT, "assets", "display-sky-sea-1280x720.png")
+STL_DIR = os.path.join(ROOT, "renders", "stl")
+SILHOUETTE_CARRIER_STL = os.path.join(STL_DIR, "luminary-silhouette-carrier.stl")
+SILHOUETTE_STL = os.path.join(STL_DIR, "luminary-silhouette.stl")
+STRUCTURES_STL = os.path.join(STL_DIR, "luminary-structures.stl")
 os.makedirs(OUT, exist_ok=True)
 
 # Palette
@@ -36,6 +41,50 @@ def mat(name, color, metallic=0.0, roughness=0.55, emission=None, strength=0.0):
     if emission:
         bsdf.inputs["Emission Color"].default_value = emission
         bsdf.inputs["Emission Strength"].default_value = strength
+    return m
+
+
+def display_image_material(image_path):
+    """LCD-like emissive material using the generated land-free backdrop."""
+    m = bpy.data.materials.new("generated sky and sea LCD image")
+    m.use_nodes = True
+    nodes = m.node_tree.nodes
+    links = m.node_tree.links
+    nodes.clear()
+    output = nodes.new("ShaderNodeOutputMaterial")
+    emission = nodes.new("ShaderNodeEmission")
+    emission.inputs["Strength"].default_value = 1.15
+    image = nodes.new("ShaderNodeTexImage")
+    image.image = bpy.data.images.load(image_path, check_existing=True)
+    image.interpolation = "Linear"
+    links.new(image.outputs["Color"], emission.inputs["Color"])
+    links.new(emission.outputs["Emission"], output.inputs["Surface"])
+    return m
+
+
+def clear_petg_material():
+    """Nearly invisible clear-filament carrier; keep only a trace of reflection."""
+    m = bpy.data.materials.new("clear PETG carrier")
+    m.use_nodes = True
+    nodes = m.node_tree.nodes
+    links = m.node_tree.links
+    nodes.clear()
+    output = nodes.new("ShaderNodeOutputMaterial")
+    transparent = nodes.new("ShaderNodeBsdfTransparent")
+    links.new(transparent.outputs["BSDF"], output.inputs["Surface"])
+    return m
+
+
+def clear_glass_material():
+    """Render-only glass for the hinged shadow-box door."""
+    m = bpy.data.materials.new("clear glass door pane")
+    m.use_nodes = True
+    nodes = m.node_tree.nodes
+    links = m.node_tree.links
+    nodes.clear()
+    output = nodes.new("ShaderNodeOutputMaterial")
+    transparent = nodes.new("ShaderNodeBsdfTransparent")
+    links.new(transparent.outputs["BSDF"], output.inputs["Surface"])
     return m
 
 
@@ -135,6 +184,33 @@ def disk(name, loc, radius, material, depth=0.8):
     return ob
 
 
+def display_image_plane(name, loc, width, height, material):
+    # Plane is oriented toward the camera on the front (-Y) face of the LCD.
+    bpy.ops.mesh.primitive_plane_add(size=2, location=loc, rotation=(math.pi / 2, 0, 0))
+    ob = bpy.context.object
+    ob.name = name
+    ob.scale = (width / 2, height / 2, 1)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    ob.data.materials.append(material)
+    return ob
+
+
+def import_print_stl(name, filepath, material, location):
+    """Import the actual OpenSCAD printable part, not a render proxy."""
+    bpy.ops.object.select_all(action="DESELECT")
+    bpy.ops.wm.stl_import(filepath=filepath)
+    imported = list(bpy.context.selected_objects)
+    for ob in imported:
+        ob.name = name
+        # OpenSCAD's XY scene plane becomes Blender's XZ front plane. Its Z
+        # extrusion becomes depth, matching the physical front-to-back stack.
+        ob.rotation_euler = (math.pi / 2, 0, 0)
+        ob.location = location
+        ob.data.materials.clear()
+        ob.data.materials.append(material)
+    return imported
+
+
 def look_at(ob, target):
     ob.rotation_euler = (Vector(target) - ob.location).to_track_quat("-Z", "Y").to_euler()
 
@@ -149,70 +225,66 @@ def build():
     dark = mat("matte black PLA", (0.035, 0.055, 0.058, 1), roughness=0.78,
                emission=(0.015, 0.022, 0.024, 1), strength=0.2)
     rock = textured_rock_material()
-    white = mat("matte white lighthouse", WHITE, roughness=0.75,
-                emission=(0.12, 0.11, 0.09, 1), strength=0.35)
+    white = mat("matte white lighthouse", (1.0, 0.99, 0.94, 1), roughness=0.52,
+                emission=(0.42, 0.40, 0.34, 1), strength=1.0)
     frame = distressed_white_frame()
-    sky = mat("animated sky display", SKY, roughness=0.35, emission=SKY, strength=0.35)
-    ocean = mat("animated ocean display", OCEAN, roughness=0.28, emission=OCEAN, strength=0.5)
-    warm = mat("lighthouse beacon", GLOW, roughness=0.2, emission=GLOW, strength=5.0)
-    cloud = mat("cloud glow", (0.76, 0.83, 0.86, 1), roughness=0.7, emission=(0.45, 0.58, 0.65, 1), strength=0.35)
+    glass = clear_glass_material()
+    hinge = mat("aged hinge metal", (0.14, 0.105, 0.065, 1), metallic=0.65, roughness=0.38)
+    lcd_body = mat("LCD black bezel", (0.008, 0.012, 0.014, 1), roughness=0.30)
+    display_image = display_image_material(DISPLAY_BACKGROUND)
+    clear_carrier = clear_petg_material()
 
     # The physical display: sky and water are intentionally behind all relief.
     # Fixed 2 in box depth, with a 35 mm silhouette-to-screen allocation.
     display_y = 38.5
-    cube("display glass / sky", (0, display_y, 62), (126.9, 3.5, 70.7), sky, bevel=2.5)
-    cube("display ocean", (0, display_y - 2.0, 42), (122, 1.0, 27), ocean)
+    cube("LCD body and bezel", (0, display_y, 62), (126.9, 3.5, 70.7), lcd_body, bevel=2.5)
+    display_image_plane("generated sky and sea on display", (0, display_y - 1.78, 62),
+                        110.32, 62.28, display_image)
     # Rear mechanical architecture: a full 5x7 printed plate with a shallow
     # 4x6 registration land behind the P4/display stack.
     cube("printed 5x7 rear plate", (0, 49.3, 62), (177.8, 3.0, 127.0), dark, bevel=3.0)
     cube("shallow 4x6 rear registration land", (0, 46.8, 62), (152.4, 1.0, 101.6), rock, bevel=1.0)
-    disk("display moon", (-37, display_y - 3.3, 78), 7, warm, depth=0.4)
-    for x, z, sx in [(-22, 86, 15), (4, 88, 11), (28, 81, 17)]:
-        bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, location=(x, display_y - 3.7, z))
-        ob = bpy.context.object
-        ob.name = "display cloud"
-        ob.scale = (sx / 2, 0.7, 3.0)
-        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-        ob.data.materials.append(cloud)
-
-    # Dark base relief, in front of the screen.
-    island = [(-71, 52), (-55, 47), (-31, 48), (-8, 44), (18, 46), (41, 48), (71, 53), (71, 62), (-71, 62)]
-    prism("dark island silhouette", island, 5.0, 3.2, dark, bevel=0.8)
-    foreground = [(-76, 33), (-63, 39), (-48, 35), (-37, 20), (-25, 15), (-8, 28), (7, 22), (18, 14), (36, 21), (52, 27), (67, 21), (76, 26), (76, 10), (-76, 10)]
-    prism("raised foreground rocks", foreground, 3.5, 5.0, rock, bevel=1.0)
-
-    # White insert: lighthouse and cottages are deliberately separate from black relief.
-    tower = [(-2.5, 51), (-2.0, 73), (2.0, 73), (2.5, 51)]
-    prism("white lighthouse tower", tower, 2.0, 3.0, white, bevel=0.35)
-    prism("white lighthouse keeper house", [(-8, 51), (-8, 59), (0, 66), (8, 59), (8, 51)], 2.0, 3.0, white, bevel=0.45)
-    cube("lighthouse lantern room", (0, 1.0, 74), (7, 3.2, 2.8), white, bevel=0.5)
-    cube("lighthouse beacon opening", (0, -0.8, 74), (3.0, 0.4, 1.3), warm, bevel=0.25)
-    for x, z, s in [(30, 53, 8), (42, 51, 6)]:
-        prism("white island cottage", [(x - s / 2, z), (x - s / 2, z + 7), (x, z + 12), (x + s / 2, z + 7), (x + s / 2, z)], 2.2, 2.5, white, bevel=0.35)
+    # Actual printable CAD parts, exported from cad/lightbox.scad. They share
+    # the same origin and stack exactly as they will in the physical assembly.
+    import_print_stl("clear PETG silhouette carrier", SILHOUETTE_CARRIER_STL, clear_carrier, (0, 5.0, 62))
+    import_print_stl("black printed silhouette relief", SILHOUETTE_STL, dark, (0, 5.0, 62))
+    import_print_stl("white printed lighthouse insert", STRUCTURES_STL, white, (0, 5.0, 62))
 
     # Frame and glass. The frame is intentionally oversized around the nominal 6x4 opening.
     cube("frame top", (0, 25.4, 116), (178, 50.8, 11), frame, bevel=2.5)
     cube("frame bottom", (0, 25.4, 8), (178, 50.8, 11), frame, bevel=2.5)
     cube("frame left", (-84, 25.4, 62), (11, 50.8, 105), frame, bevel=2.5)
     cube("frame right", (84, 25.4, 62), (11, 50.8, 105), frame, bevel=2.5)
-    # The real object has a glass door. It is omitted from this beauty render
-    # so the camera can show the relief and display clearly without opaque-glass
-    # color-management artifacts. Add a transparent glass shader for final
-    # optical studies if required.
+
+    # Hinged front door: shallow distressed-wood frame and clear glass. It sits
+    # proud of the 2 in case and is intentionally separate from printed parts.
+    door_y = -3.0
+    cube("door top rail", (0, door_y, 119), (170, 5.0, 8), frame, bevel=1.6)
+    cube("door bottom rail", (0, door_y, 5), (170, 5.0, 8), frame, bevel=1.6)
+    cube("door left rail", (-81, door_y, 62), (8, 5.0, 114), frame, bevel=1.6)
+    cube("door right rail", (81, door_y, 62), (8, 5.0, 114), frame, bevel=1.6)
+    cube("door glass", (0, door_y - 0.15, 62), (154, 0.6, 106), glass)
+    for z in (31, 93):
+        bpy.ops.mesh.primitive_cylinder_add(vertices=24, radius=2.2, depth=11,
+                                            location=(-85, door_y - 2.6, z))
+        h = bpy.context.object
+        h.name = "door hinge"
+        h.rotation_euler = (math.pi / 2, 0, 0)
+        h.data.materials.append(hinge)
 
     # Ground plane and lighting.
     ground = mat("ground", (0.055, 0.06, 0.055, 1), roughness=0.85)
     cube("ground", (0, 45, -3), (500, 500, 4), ground)
-    bpy.ops.object.light_add(type="AREA", location=(-110, -180, 220))
+    bpy.ops.object.light_add(type="AREA", location=(-100, -260, 220))
     key = bpy.context.object
     key.name = "softbox key"
-    key.data.energy = 1050
+    key.data.energy = 1450
     key.data.shape = 'DISK'
     key.data.size = 180
     look_at(key, (0, 0, 55))
-    bpy.ops.object.light_add(type="AREA", location=(100, -80, 100))
+    bpy.ops.object.light_add(type="AREA", location=(110, -180, 120))
     fill = bpy.context.object
-    fill.data.energy = 420
+    fill.data.energy = 700
     fill.data.size = 100
     look_at(fill, (0, 0, 55))
 
@@ -234,9 +306,9 @@ def build():
     # Camera.
     # Slight three-quarter angle to reveal frame depth and layered relief.
     # Strong enough perspective to expose the 35 mm relief-to-display stack.
-    bpy.ops.object.camera_add(location=(260, -270, 125))
+    bpy.ops.object.camera_add(location=(120, -440, 102))
     cam = bpy.context.object
-    cam.data.lens = 62
+    cam.data.lens = 68
     cam.data.sensor_width = 36
     look_at(cam, (0, 0, 60))
     bpy.context.scene.camera = cam
@@ -245,11 +317,13 @@ def build():
     world.color = (0.008, 0.012, 0.014)
     world.use_nodes = True
     world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.022, 0.028, 0.03, 1)
-    world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.35
+    world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.55
 
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
-    scene.cycles.samples = 16
+    # A fast preview can be requested with LUMINARY_SAMPLES=4; final renders
+    # retain the 16-sample Cycles setting by default.
+    scene.cycles.samples = int(os.environ.get("LUMINARY_SAMPLES", "16"))
     scene.cycles.use_denoising = True
     scene.render.resolution_x = 800
     scene.render.resolution_y = 600
