@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Reference-derived silhouette, sized to the 142.4 x 91.6 mm panel field. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="142.4mm" height="91.6mm" viewBox="0 0 142.4 91.6">
+  <g fill="#000000">
+    <path d="M0 48 C12 44 22 43 31 44 C42 43 54 40 65 41 C78 39 91 41 103 43 C117 42 130 45 142.4 48 L142.4 58 L0 58 Z"/>
+    <path d="M0 53 C17 50 25 51 39 49 C53 47 65 48 79 47 C97 47 111 50 126 49 C134 49 138 50 142.4 51 L142.4 62 L0 62 Z"/>
+    <path d="M103.4 22 L108.2 22 L109.0 42 L102.6 42 Z M102 21 L109.6 21 L109.6 23 L102 23 Z M103 18.8 L108.6 18.8 L108.6 21 L103 21 Z M104.3 16.8 L107.3 16.8 L107.3 18.8 L104.3 18.8 Z M105 15 L106.6 15 L106.6 16.8 L105 16.8 Z"/>
+    <path d="M94 33 L101 27 L108 33 L108 42 L94 42 Z M92.8 33 L101 26 L109.2 33 Z"/>
+    <rect x="98.5" y="35" width="2.2" height="4" fill="#ffffff"/>
+    <rect x="103.7" y="34.5" width="2" height="2.2" fill="#ffffff"/>
+    <path d="M70 38 L75 34 L80 38 L80 44 L70 44 Z M69 38 L75 33 L81 38 Z M82 40 L85.5 37 L89 40 L89 44 L82 44 Z M81.3 40 L85.5 36.5 L89.7 40 Z"/>
+    <rect x="73.5" y="39" width="1.5" height="3" fill="#ffffff"/>
+  </g>
+</svg>

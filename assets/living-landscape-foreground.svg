@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Foreground rocks and surf layer; same 142.4 x 91.6 mm panel field. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="142.4mm" height="91.6mm" viewBox="0 0 142.4 91.6">
+  <g fill="#000000">
+    <path d="M0 72 L11 66 L24 69 L34 78 L39 91.6 L0 91.6 Z"/>
+    <path d="M22 91.6 L28 78 L39 72 L51 75 L61 91.6 Z"/>
+    <path d="M91 91.6 L100 79 L112 76 L123 81 L142.4 78 L142.4 91.6 Z"/>
+    <path d="M0 65 C14 62 26 63 38 66 C49 69 59 70 72 67 C84 64 95 65 105 69 C116 73 129 70 142.4 68 L142.4 71 C129 74 116 76 104 72 C93 68 83 68 72 71 C57 74 45 72 35 69 C22 65 11 66 0 68 Z"/>
+    <path d="M49 78 C65 74 75 76 85 80 C94 83 104 83 116 79 L119 81 C105 87 94 87 83 83 C73 79 64 78 51 81 Z"/>
+  </g>
+</svg>
