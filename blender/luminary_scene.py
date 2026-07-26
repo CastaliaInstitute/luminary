@@ -40,25 +40,52 @@ def mat(name, color, metallic=0.0, roughness=0.55, emission=None, strength=0.0):
 
 
 def distressed_white_frame():
-    """Warm white painted wood with subtle gray wear variation."""
-    m = mat("distressed white painted frame", (0.78, 0.75, 0.67, 1), roughness=0.72,
+    """Warm white paint rubbed through to brown wood grain."""
+    m = mat("distressed white painted wood", (0.78, 0.75, 0.67, 1), roughness=0.72,
             emission=(0.035, 0.03, 0.022, 1), strength=0.12)
     nodes = m.node_tree.nodes
     links = m.node_tree.links
     bsdf = nodes.get("Principled BSDF")
     noise = nodes.new("ShaderNodeTexNoise")
-    noise.inputs["Scale"].default_value = 8.0
-    noise.inputs["Detail"].default_value = 5.0
+    noise.inputs["Scale"].default_value = 5.5
+    noise.inputs["Detail"].default_value = 8.0
     noise.inputs["Roughness"].default_value = 0.78
     ramp = nodes.new("ShaderNodeValToRGB")
-    ramp.color_ramp.elements[0].position = 0.28
-    ramp.color_ramp.elements[0].color = (0.38, 0.35, 0.29, 1)
-    ramp.color_ramp.elements[1].position = 0.62
-    ramp.color_ramp.elements[1].color = (1.0, 0.97, 0.88, 1)
+    ramp.color_ramp.elements[0].position = 0.24
+    ramp.color_ramp.elements[0].color = (0.16, 0.065, 0.025, 1)
+    ramp.color_ramp.elements[1].position = 0.70
+    ramp.color_ramp.elements[1].color = (0.98, 0.93, 0.81, 1)
+    worn = ramp.color_ramp.elements.new(0.39)
+    worn.color = (0.30, 0.13, 0.055, 1)
+    paint = ramp.color_ramp.elements.new(0.52)
+    paint.color = (0.88, 0.82, 0.69, 1)
     links.new(noise.outputs["Fac"], ramp.inputs["Fac"])
     links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])
+    bump = nodes.new("ShaderNodeBump")
+    bump.inputs["Strength"].default_value = 0.30
+    bump.inputs["Distance"].default_value = 0.22
+    links.new(noise.outputs["Fac"], bump.inputs["Height"])
+    links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
     bsdf.inputs["Emission Color"].default_value = (0.42, 0.39, 0.32, 1)
     bsdf.inputs["Emission Strength"].default_value = 0.45
+    return m
+
+
+def textured_rock_material():
+    m = mat("charcoal rock with grain", (0.055, 0.07, 0.068, 1), roughness=0.92,
+            emission=(0.012, 0.016, 0.015, 1), strength=0.16)
+    nodes = m.node_tree.nodes
+    links = m.node_tree.links
+    bsdf = nodes.get("Principled BSDF")
+    noise = nodes.new("ShaderNodeTexNoise")
+    noise.inputs["Scale"].default_value = 13.0
+    noise.inputs["Detail"].default_value = 7.0
+    noise.inputs["Roughness"].default_value = 0.82
+    bump = nodes.new("ShaderNodeBump")
+    bump.inputs["Strength"].default_value = 0.35
+    bump.inputs["Distance"].default_value = 0.32
+    links.new(noise.outputs["Fac"], bump.inputs["Height"])
+    links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
     return m
 
 
@@ -121,8 +148,7 @@ def build():
 
     dark = mat("matte black PLA", (0.035, 0.055, 0.058, 1), roughness=0.78,
                emission=(0.015, 0.022, 0.024, 1), strength=0.2)
-    rock = mat("charcoal rock", (0.075, 0.105, 0.105, 1), roughness=0.9,
-               emission=(0.025, 0.035, 0.034, 1), strength=0.25)
+    rock = textured_rock_material()
     white = mat("matte white lighthouse", WHITE, roughness=0.75,
                 emission=(0.12, 0.11, 0.09, 1), strength=0.35)
     frame = distressed_white_frame()
@@ -132,15 +158,17 @@ def build():
     cloud = mat("cloud glow", (0.76, 0.83, 0.86, 1), roughness=0.7, emission=(0.45, 0.58, 0.65, 1), strength=0.35)
 
     # The physical display: sky and water are intentionally behind all relief.
-    cube("display glass / sky", (0, 10.5, 62), (126.9, 3.5, 70.7), sky, bevel=2.5)
-    cube("display ocean", (0, 8.5, 42), (122, 1.0, 27), ocean)
+    # The physical silhouette is 44.45 mm in front of the display.
+    display_y = 46.5
+    cube("display glass / sky", (0, display_y, 62), (126.9, 3.5, 70.7), sky, bevel=2.5)
+    cube("display ocean", (0, display_y - 2.0, 42), (122, 1.0, 27), ocean)
     # Rear mechanical architecture: a full 5x7 printed plate with a shallow
     # 4x6 registration land behind the P4/display stack.
-    cube("printed 5x7 rear plate", (0, 27, 62), (177.8, 5.0, 127.0), dark, bevel=3.0)
-    cube("shallow 4x6 rear registration land", (0, 23.5, 62), (152.4, 1.0, 101.6), rock, bevel=1.0)
-    disk("display moon", (-37, 7.2, 78), 7, warm, depth=0.4)
+    cube("printed 5x7 rear plate", (0, display_y + 22, 62), (177.8, 5.0, 127.0), dark, bevel=3.0)
+    cube("shallow 4x6 rear registration land", (0, display_y + 18.5, 62), (152.4, 1.0, 101.6), rock, bevel=1.0)
+    disk("display moon", (-37, display_y - 3.3, 78), 7, warm, depth=0.4)
     for x, z, sx in [(-22, 86, 15), (4, 88, 11), (28, 81, 17)]:
-        bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, location=(x, 6.8, z))
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, location=(x, display_y - 3.7, z))
         ob = bpy.context.object
         ob.name = "display cloud"
         ob.scale = (sx / 2, 0.7, 3.0)
@@ -163,10 +191,10 @@ def build():
         prism("white island cottage", [(x - s / 2, z), (x - s / 2, z + 7), (x, z + 12), (x + s / 2, z + 7), (x + s / 2, z)], -4.5, 2.5, white, bevel=0.35)
 
     # Frame and glass. The frame is intentionally oversized around the nominal 6x4 opening.
-    cube("frame top", (0, -10, 116), (178, 18, 11), frame, bevel=2.5)
-    cube("frame bottom", (0, -10, 8), (178, 18, 11), frame, bevel=2.5)
-    cube("frame left", (-84, -10, 62), (11, 18, 105), frame, bevel=2.5)
-    cube("frame right", (84, -10, 62), (11, 18, 105), frame, bevel=2.5)
+    cube("frame top", (0, -10, 116), (178, 28, 11), frame, bevel=2.5)
+    cube("frame bottom", (0, -10, 8), (178, 28, 11), frame, bevel=2.5)
+    cube("frame left", (-84, -10, 62), (11, 28, 105), frame, bevel=2.5)
+    cube("frame right", (84, -10, 62), (11, 28, 105), frame, bevel=2.5)
     # The real object has a glass door. It is omitted from this beauty render
     # so the camera can show the relief and display clearly without opaque-glass
     # color-management artifacts. Add a transparent glass shader for final
@@ -178,19 +206,35 @@ def build():
     bpy.ops.object.light_add(type="AREA", location=(-110, -180, 220))
     key = bpy.context.object
     key.name = "softbox key"
-    key.data.energy = 650
+    key.data.energy = 1050
     key.data.shape = 'DISK'
     key.data.size = 180
     look_at(key, (0, 0, 55))
     bpy.ops.object.light_add(type="AREA", location=(100, -80, 100))
     fill = bpy.context.object
-    fill.data.energy = 260
+    fill.data.energy = 420
     fill.data.size = 100
     look_at(fill, (0, 0, 55))
 
+    # Blue screen spill across the relief, plus a warm local lighthouse glow.
+    bpy.ops.object.light_add(type="AREA", location=(0, -45, 72))
+    screen_spill = bpy.context.object
+    screen_spill.name = "cool display spill"
+    screen_spill.data.energy = 240
+    screen_spill.data.color = (0.12, 0.38, 0.55)
+    screen_spill.data.size = 110
+    look_at(screen_spill, (0, 0, 52))
+    bpy.ops.object.light_add(type="POINT", location=(0, -24, 74))
+    beacon = bpy.context.object
+    beacon.name = "warm lighthouse beacon spill"
+    beacon.data.energy = 55
+    beacon.data.color = (1.0, 0.34, 0.08)
+    beacon.data.shadow_soft_size = 12
+
     # Camera.
     # Slight three-quarter angle to reveal frame depth and layered relief.
-    bpy.ops.object.camera_add(location=(150, -320, 96))
+    # Strong enough perspective to expose the 37 mm front-to-back stack.
+    bpy.ops.object.camera_add(location=(260, -270, 125))
     cam = bpy.context.object
     cam.data.lens = 62
     cam.data.sensor_width = 36
@@ -204,9 +248,11 @@ def build():
     world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.35
 
     scene = bpy.context.scene
-    scene.render.engine = "BLENDER_EEVEE_NEXT"
-    scene.render.resolution_x = 1000
-    scene.render.resolution_y = 760
+    scene.render.engine = "CYCLES"
+    scene.cycles.samples = 16
+    scene.cycles.use_denoising = True
+    scene.render.resolution_x = 800
+    scene.render.resolution_y = 600
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "PNG"
     scene.render.filepath = os.path.join(OUT, "luminary-concept.png")

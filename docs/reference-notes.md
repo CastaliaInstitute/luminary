@@ -6,6 +6,7 @@
 - `references/Photo 1.jpg`
 - `references/Photo 2.jpg`
 - `references/Pasted Image 1.jpg`
+- `references/Distressed White Frame.jpg`
 - `assets/living-landscape-silhouette.svg`
 - `assets/living-landscape-foreground.svg`
 - `assets/living-landscape-structures.svg`
@@ -22,7 +23,7 @@
 | Visible silhouette face | 0.8 mm | Design brief |
 | Hidden rear ribs | ~2 mm deep | Design brief |
 | Magnet reference | 3 × 1 mm neodymium | Design brief |
-| Silhouette-to-display air gap | 2–3 mm | Design brief |
+| Silhouette-to-display depth | 44.45 mm (1.75 in) | New mechanical requirement |
 | Printed rear plate | 177.8 × 127.0 mm (5 × 7 in) | New mechanical requirement |
 | Shallow rear registration land | 152.4 × 101.6 mm (4 × 6 in) | New mechanical requirement |
 | USB-C cable pass-throughs | 8 mm circular default, side + bottom-center | New mechanical requirement |

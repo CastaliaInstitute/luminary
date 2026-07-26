@@ -59,7 +59,7 @@ show_glass_hardware = true;
 // Carrier and stack-up assumptions; verify against the actual frame.
 carrier_t = 3.0;
 carrier_clearance = 1.5;
-display_gap = 2.5;
+display_gap = 44.45; // 1.75 in silhouette-to-display depth
 pcb_standoff_h = 4.0;
 
 module rounded_box(size, radius = 3) {
