@@ -40,21 +40,25 @@ module magnetic_frame() {
 // AI-separated assets are intentionally independent opaque pieces. The small clear
 // supports required for isolated pieces live behind them in the magnetic frame.
 module island_layer() {
-    translate([-50, 6, frame_t])
-        resize([100, 24, 0])
+    // Registered to the source photo: the island shoreline falls just below
+    // the LCD horizon rather than floating in the upper sky.
+    translate([-48.5, -14, frame_t])
+        resize([88, 24, 0])
             linear_extrude(height = 0.8)
                 import("../assets/nubble-island-mask.svg");
 }
 
 module breaker_layer() {
-    translate([-18, -11, frame_t + 1.2])
-        resize([36, 7, 0])
+    // The isolated rock sits under the central breaking wave, not as a second
+    // large island. Its source footprint is deliberately small.
+    translate([-10, -25, frame_t + 1.2])
+        resize([20, 5, 0])
             linear_extrude(height = 0.8)
                 import("../assets/nubble-breaker-mask.svg");
 }
 
 module foreground_layer() {
-    translate([-55, -42, frame_t + 2.4])
+    translate([-55, -48, frame_t + 2.4])
         resize([110, 27, 0])
             linear_extrude(height = 1.2)
                 import("../assets/nubble-foreground-mask.svg");

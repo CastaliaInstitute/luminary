@@ -256,8 +256,10 @@ def build():
 
     # The physical display: sky and water are intentionally behind all relief.
     # Fixed 2 in box depth, with a 20 mm silhouette-to-screen allocation.
-    # The closer plane substantially reduces off-axis parallax.
-    display_y = 25.5
+    # Keep the LCD close to the relief: at the intended three-quarter viewing
+    # angle, a larger gap makes the source-registered masks visibly drift from
+    # their sky, horizon, and breaking-wave landmarks.
+    display_y = 14.5
     cube("LCD body and bezel", (0, display_y, 62), (126.9, 3.5, 70.7), lcd_body, bevel=2.5)
     display_image_plane("generated sky and sea on display", (0, display_y - 1.78, 62),
                         110.32, 62.28, display_image)
