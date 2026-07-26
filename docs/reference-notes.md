@@ -8,6 +8,7 @@
 - `references/Pasted Image 1.jpg`
 - `assets/living-landscape-silhouette.svg`
 - `assets/living-landscape-foreground.svg`
+- `assets/living-landscape-structures.svg`
 
 ## Dimensions captured
 
@@ -36,8 +37,8 @@ following need physical verification before printing a final carrier or enclosur
 
 ## Usage
 
-Open `cad/lightbox.scad` in OpenSCAD and set `part` to `assembly`, `silhouette`, `carrier`,
-`display`, or `pcb`. Render with F6, then export the selected part as STL. The geometry is
+Open `cad/lightbox.scad` in OpenSCAD and set `part` to `assembly`, `silhouette`, `structures`,
+`carrier`, `display`, or `pcb`. Render with F6, then export the selected part as STL. The geometry is
 centered on the origin so it can be aligned with a future SVG-derived landscape silhouette.
 
 ## Silhouette composition
@@ -50,6 +51,25 @@ openings for the animated display to show through.
 ## Relief strategy
 
 The silhouette is designed around a 0.2 mm nozzle: the base scene is 4 layers (0.8 mm),
-and the foreground rocks/surf are raised another 8 layers (1.6 mm total). This keeps every
-thickness aligned to whole nozzle-width layer increments while leaving room to add a future
-6-layer (1.2 mm) midground tier for the lighthouse or cottages.
+and the foreground rocks/surf are raised another 8 layers (1.6 mm total). The lighthouse and
+cottage insert is a separate white-print part at 6 layers (1.2 mm). This keeps every thickness
+aligned to whole nozzle-width layer increments.
+
+## Render handoff
+
+The Blender scene generator is `blender/luminary_scene.py`. From the repository root:
+
+```sh
+/Applications/Blender.app/Contents/MacOS/Blender --background --python blender/luminary_scene.py
+```
+
+This writes the editable scene and the current concept render to `renders/`. The render omits
+the real glass door so the display and relief remain legible; the physical assembly still
+reserves the glass-door layer.
+
+Current fit-check exports:
+
+- `renders/luminary-silhouette.stl`
+- `renders/luminary-structures.stl`
+- `renders/luminary-carrier.stl`
+- `renders/luminary-display.stl`

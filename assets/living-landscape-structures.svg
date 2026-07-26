@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Separate white-print structures; same 142.4 x 91.6 mm panel field. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="142.4mm" height="91.6mm" viewBox="0 0 142.4 91.6">
+  <g fill="#000000">
+    <path d="M103.4 22 L108.2 22 L109 42 L102.6 42 Z M102 21 L109.6 21 L109.6 23 L102 23 Z M103 18.8 L108.6 18.8 L108.6 21 L103 21 Z M104.3 16.8 L107.3 16.8 L107.3 18.8 L104.3 18.8 Z M105 15 L106.6 15 L106.6 16.8 L105 16.8 Z"/>
+    <path d="M94 33 L101 27 L108 33 L108 42 L94 42 Z M92.8 33 L101 26 L109.2 33 Z"/>
+    <path d="M70 38 L75 34 L80 38 L80 44 L70 44 Z M69 38 L75 33 L81 38 Z M82 40 L85.5 37 L89 40 L89 44 L82 44 Z M81.3 40 L85.5 36.5 L89.7 40 Z"/>
+  </g>
+</svg>

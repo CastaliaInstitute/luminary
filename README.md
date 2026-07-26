@@ -11,7 +11,10 @@ Early development. This repository is the source of truth for the Lightbox proje
 ```text
 .
 ├── README.md
+├── blender/        # Blender scene-generation script
+├── cad/            # Parametric OpenSCAD model
 ├── docs/          # Product, design, and technical notes
+├── renders/        # Concept render and fit-check STLs
 └── src/           # Implementation source
 ```
 
@@ -20,6 +23,8 @@ Early development. This repository is the source of truth for the Lightbox proje
 The project page is published at [luminary.castalia.institute](https://luminary.castalia.institute).
 
 Open `cad/lightbox.scad` in OpenSCAD to inspect or export the current parametric model.
+The latest concept render is `renders/luminary-concept.png`; the editable Blender scene is
+`renders/luminary-concept.blend`.
 
 ## Project principles
 

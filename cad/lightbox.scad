@@ -1,8 +1,8 @@
-// Lightbox / Living Landscape shadow-box starter model
+// Luminary / Living Landscape shadow-box model
 // Units: millimetres. Reference: docs/reference-notes.md
 //
 // Render one part at a time by changing `part` below:
-//   "assembly", "silhouette", "carrier", "display", "pcb"
+//   "assembly", "silhouette", "structures", "carrier", "display", "pcb"
 
 $fn = 64;
 
@@ -55,7 +55,7 @@ module magnet_pocket(x, y) {
         cylinder(d = magnet_d + 0.20, h = magnet_h + 0.02);
 }
 
-module silhouette_panel() {
+module dark_silhouette_panel() {
     difference() {
         // Full 4x6 panel with a thin visible border.
         translate([-panel_w / 2, -panel_h / 2, 0])
@@ -70,8 +70,7 @@ module silhouette_panel() {
                 magnet_pocket(x, y);
     }
 
-    // Photo-derived coastal scene. Keep the SVG separate so the silhouette
-    // can be revised without changing the mechanical envelope.
+    // Photo-derived dark coastal scene. White structures are a separate part.
     if (scene_art)
         translate([-panel_w / 2 + panel_border, -panel_h / 2 + panel_border, 0])
             linear_extrude(height = nozzle_d * scene_base_layers)
@@ -91,6 +90,12 @@ module silhouette_panel() {
     for (y = [-panel_h / 2 + panel_border, panel_h / 2 - panel_border - rib_t])
         translate([-panel_w / 2 + panel_border, y, silhouette_t])
             cube([panel_w - 2 * panel_border, rib_t, rib_h]);
+}
+
+module white_structures() {
+    translate([-panel_w / 2 + panel_border, -panel_h / 2 + panel_border, silhouette_t])
+        linear_extrude(height = nozzle_d * scene_mid_layers)
+            import("../assets/living-landscape-structures.svg");
 }
 
 module display_model() {
@@ -126,15 +131,17 @@ module carrier() {
 }
 
 module assembly() {
-    // Front-to-back stack: silhouette, air gap, display, carrier, PCB.
-    color("#161616") silhouette_panel();
+    // Front-to-back stack: dark silhouette, white structures, display, carrier, PCB.
+    color("#161616") dark_silhouette_panel();
+    color("#f1eee4") white_structures();
     translate([0, 0, silhouette_t + display_gap]) display_model();
     translate([0, 0, silhouette_t + display_gap + 4.0 + 0.5]) carrier();
     translate([0, 0, silhouette_t + display_gap + 4.0 + 0.5 + carrier_t + pcb_standoff_h]) pcb_model();
 }
 
 if (part == "assembly") assembly();
-if (part == "silhouette") silhouette_panel();
+if (part == "silhouette") dark_silhouette_panel();
+if (part == "structures") white_structures();
 if (part == "carrier") carrier();
 if (part == "display") display_model();
 if (part == "pcb") pcb_model();
