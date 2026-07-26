@@ -48,3 +48,10 @@ Blender mesh audit: the P4 backplate, door reference, island, breaker, and
 foreground STLs each have zero non-manifold and zero boundary edges. The P4
 registration land clears the 164.28 x 99.17 mm display envelope by 0.86 mm at
 each side and 1.215 mm at the top and bottom.
+
+Before each STL release, run `scripts/compile-bas-relief.sh nubble-aligned` and
+inspect `scenes/nubble-aligned/compiled/reference-alignment.png`. It overlays
+the printable masks on the original source photograph: island in red, breaker
+in gold, and foreground rocks in cyan. Reject the export if any contour or
+scale does not match the photograph. `scripts/verify-production.sh` regenerates
+and size-checks this validation artifact along with the mesh audit.

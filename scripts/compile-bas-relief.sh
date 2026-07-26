@@ -46,4 +46,25 @@ fi
 magick "$root/background.png" "$out/depth.png" -compose Blend -define compose:args=65,35 \
   -composite "$out/alignment-preview.png"
 
-identify "$root/background.png" "$out/depth.png" "$out/alignment-preview.png"
+# Validation is performed against the original photograph, never the generated
+# background. Each layer keeps its exact 1024 x 600 source coordinates and is
+# overlaid in a separate translucent color for a fast visual contour check.
+make_reference_overlay() {
+  local layer="$1"
+  local color="$2"
+  magick -size 1024x600 "xc:$color" "$out/$layer-mask.png" -alpha off \
+    -compose CopyOpacity -composite \
+    -channel A -evaluate multiply 0.48 +channel "$out/$layer-overlay.png"
+}
+
+make_reference_overlay island '#ff4d4d'
+make_reference_overlay breaker '#ffd447'
+make_reference_overlay foreground '#32d8ff'
+magick "$root/source.png" \
+  "$out/island-overlay.png" -compose Over -composite \
+  "$out/breaker-overlay.png" -compose Over -composite \
+  "$out/foreground-overlay.png" -compose Over -composite \
+  "$out/reference-alignment.png"
+
+identify "$root/background.png" "$out/depth.png" "$out/alignment-preview.png" \
+  "$out/reference-alignment.png"
