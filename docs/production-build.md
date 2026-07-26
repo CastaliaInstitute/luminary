@@ -26,7 +26,7 @@ depth is 5.0 mm; the remaining box depth is open air for shadow and parallax.
 The plate is 177.8 x 127 x 3 mm with a 166 x 101.6 mm P4 registration land,
 four rear-facing 6.2 x 2.1 mm magnet pockets, and both side and bottom-centre
 8 mm cable exits. Use M2.5 machine screws and washers through the four 6 x
-3.2 mm tolerance slots. The slots intentionally allow the mount to match the
+5.2 mm tolerance slots. The slots intentionally allow the mount to match the
 actual board-hole pattern, which must be checked against the physical P4 before
 final assembly.
 

@@ -2,7 +2,7 @@
 // Matte-black PLA; dimensions in millimetres. Export directly to STL.
 //
 // Confirmed P4 envelope: PCB 164 x 97 mm; LCD/bezel 164.28 x 99.17 mm.
-// The mounting pattern uses 6 x 3.2 mm tolerance slots for M2.5 fasteners
+// The mounting pattern uses 6 x 5.2 mm tolerance slots for M2.5 fasteners
 // because the vendor image does not certify exact hole-center coordinates.
 
 $fn = 20;
@@ -18,7 +18,7 @@ p4_land_t = 1.2;
 slot_dx = 78.0;
 slot_dy = 44.0;
 slot_len = 6.0;
-slot_d = 3.2;
+slot_d = 5.2;
 counterbore_d = 5.8;
 counterbore_t = 1.4;
 
