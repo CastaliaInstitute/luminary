@@ -25,7 +25,8 @@
 | Silhouette-to-display air gap | 2–3 mm | Design brief |
 | Printed rear plate | 177.8 × 127.0 mm (5 × 7 in) | New mechanical requirement |
 | Raised rear mounting insert | 152.4 × 101.6 mm (4 × 6 in) | New mechanical requirement |
-| Rear magnet reference | 3 × 1 mm pocket, 4 corners | New mechanical requirement |
+| Silhouette magnet reference | 3 × 1 mm magnet pocket, 4 corners | Design brief |
+| Glass steel squares | 1/4 × 1/4 in, 4 corners | New mechanical requirement |
 
 ## Modeling assumptions
 
@@ -39,12 +40,12 @@ following need physical verification before printing a final carrier or enclosur
 - whether the 4 × 6 panel is centered or offset within the frame.
 - exact female USB-C adapter body, flange, screw pattern, and cable bend radius;
 - exact P4 PCB hole coordinates and connector keep-outs;
-- steel plate thickness, position, and polarity/spacing relative to the magnet pockets.
+- steel plate thickness, position, and spacing relative to the silhouette magnet pockets.
 
 ## Usage
 
 Open `cad/lightbox.scad` in OpenSCAD and set `part` to `assembly`, `silhouette`, `structures`,
-`backplate`, `carrier`, `display`, or `pcb`. Render with F6, then export the selected part as STL. The geometry is
+`glass_hardware`, `backplate`, `carrier`, `display`, or `pcb`. Render with F6, then export the selected part as STL. The geometry is
 centered on the origin so it can be aligned with a future SVG-derived landscape silhouette.
 
 ## Silhouette composition
@@ -87,3 +88,8 @@ mounting land for the P4/display assembly. Four rear-facing pockets accept magne
 mate with steel plates bonded to the inside back of the shadow-box frame. The default USB-C
 support is on the left side and is intentionally parameterized for a panel-mount female
 connector; measure the actual connector before releasing the part for print.
+
+The removable silhouette is retained separately by four 3 × 1 mm magnets in its corner
+pockets. Each magnet aligns to a 1/4 × 1/4 inch steel square bonded to the inside face of
+the glass door. `glass_hardware` renders those steel squares as a fit-check overlay; verify
+the final adhesive thickness and corner offsets on the actual glass before printing.

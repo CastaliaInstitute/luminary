@@ -2,7 +2,7 @@
 // Units: millimetres. Reference: docs/reference-notes.md
 //
 // Render one part at a time by changing `part` below:
-//   "assembly", "silhouette", "structures", "backplate", "carrier", "display", "pcb"
+//   "assembly", "silhouette", "structures", "glass_hardware", "backplate", "carrier", "display", "pcb"
 
 $fn = 64;
 
@@ -51,6 +51,12 @@ magnet_d = 3.0;
 magnet_h = 1.0;
 magnet_edge = 7.0;
 
+// Glass-door attachment hardware
+steel_square_w = 6.35; // 1/4 in
+steel_square_t = 1.0;
+steel_square_edge = 7.0;
+show_glass_hardware = true;
+
 // Carrier and stack-up assumptions; verify against the actual frame.
 carrier_t = 3.0;
 carrier_clearance = 1.5;
@@ -68,6 +74,19 @@ module rounded_box(size, radius = 3) {
 module magnet_pocket(x, y) {
     translate([x, y, silhouette_t - magnet_h - 0.01])
         cylinder(d = magnet_d + 0.20, h = magnet_h + 0.02);
+}
+
+module glass_steel_square(x, y) {
+    // Square is bonded to the inside face of the glass; the magnet is retained
+    // in the silhouette panel directly behind it.
+    translate([x, y, -steel_square_t])
+        cube([steel_square_w, steel_square_w, steel_square_t], center = true);
+}
+
+module glass_hardware() {
+    for (x = [-panel_w / 2 + steel_square_edge, panel_w / 2 - steel_square_edge])
+        for (y = [-panel_h / 2 + steel_square_edge, panel_h / 2 - steel_square_edge])
+            glass_steel_square(x, y);
 }
 
 module dark_silhouette_panel() {
@@ -202,6 +221,7 @@ module carrier() {
 module assembly() {
     // Front-to-back stack: dark silhouette, white structures, display, carrier, PCB.
     color("#161616") dark_silhouette_panel();
+    if (show_glass_hardware) color("#777777") glass_hardware();
     color("#f1eee4") white_structures();
     translate([0, 0, silhouette_t + display_gap]) display_model();
     translate([0, 0, silhouette_t + display_gap + 4.0 + 0.5]) carrier();
@@ -212,6 +232,7 @@ module assembly() {
 if (part == "assembly") assembly();
 if (part == "silhouette") dark_silhouette_panel();
 if (part == "structures") white_structures();
+if (part == "glass_hardware") glass_hardware();
 if (part == "backplate") rear_backplate();
 if (part == "carrier") carrier();
 if (part == "display") display_model();
