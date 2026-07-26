@@ -39,7 +39,8 @@ usb_bottom_edge_clearance = 3.0;
 
 // Printed silhouette panel
 silhouette_t = 0.80;
-panel_border = 4.0; // thin 4 x 6 in mounting frame
+glass_rabbet_margin = 8.0; // hidden by the door's glass-mounting margin
+panel_border = glass_rabbet_margin;
 scene_art = true;
 nozzle_d = 0.20;
 scene_base_layers = 4;       // 0.80 mm: visible face
@@ -49,14 +50,16 @@ rib_t = 2.0;
 rib_h = 6.0;
 magnet_d = 3.0;
 magnet_h = 1.0;
-magnet_edge = 7.0;
+magnet_edge = 4.0; // centers each 8 mm pod within the hidden perimeter
 magnet_pod_w = 8.0;
 magnet_pod_t = 2.0; // hidden depth; gives the 1 mm magnet a real pocket
+svg_field_w = 142.4;
+svg_field_h = 91.6;
 
 // Glass-door attachment hardware
 steel_square_w = 6.35; // 1/4 in
 steel_square_t = 1.0;
-steel_square_edge = 7.0;
+steel_square_edge = 4.0;
 show_glass_hardware = true;
 
 // Carrier and stack-up assumptions; verify against the actual frame.
@@ -104,7 +107,8 @@ module glass_hardware() {
 
 module dark_silhouette_panel() {
     difference() {
-        // Thin 4x6 mounting frame; the open center is filled only by scene art.
+    // Thin 4x6 mounting frame, hidden behind the door's glass rabbet; only the
+    // clear inner window is intended to remain visible.
         translate([-panel_w / 2, -panel_h / 2, 0])
             cube([panel_w, panel_h, silhouette_t]);
 
@@ -123,15 +127,19 @@ module dark_silhouette_panel() {
     // Photo-derived dark coastal scene. White structures are a separate part.
     if (scene_art)
         translate([-panel_w / 2 + panel_border, -panel_h / 2 + panel_border, 0])
-            linear_extrude(height = nozzle_d * scene_base_layers)
-                import("../assets/living-landscape-silhouette.svg");
+            scale([(panel_w - 2 * panel_border) / svg_field_w,
+                   (panel_h - 2 * panel_border) / svg_field_h, 1])
+                linear_extrude(height = nozzle_d * scene_base_layers)
+                    import("../assets/living-landscape-silhouette.svg");
 
     // Raised foreground gives the rocks a stronger shadow line. Water and surf
     // remain open so the display can render motion and changing light.
     if (scene_art)
         translate([-panel_w / 2 + panel_border, -panel_h / 2 + panel_border, nozzle_d * scene_base_layers])
-            linear_extrude(height = nozzle_d * scene_foreground_layers)
-                import("../assets/living-landscape-foreground.svg");
+            scale([(panel_w - 2 * panel_border) / svg_field_w,
+                   (panel_h - 2 * panel_border) / svg_field_h, 1])
+                linear_extrude(height = nozzle_d * scene_foreground_layers)
+                    import("../assets/living-landscape-foreground.svg");
 
     // Minimal hidden ribs to stiffen the panel. Replace with the SVG-derived
     // landscape silhouette as the scene geometry is designed.
@@ -145,8 +153,10 @@ module dark_silhouette_panel() {
 
 module white_structures() {
     translate([-panel_w / 2 + panel_border, -panel_h / 2 + panel_border, silhouette_t])
-        linear_extrude(height = nozzle_d * scene_mid_layers)
-            import("../assets/living-landscape-structures.svg");
+        scale([(panel_w - 2 * panel_border) / svg_field_w,
+               (panel_h - 2 * panel_border) / svg_field_h, 1])
+            linear_extrude(height = nozzle_d * scene_mid_layers)
+                import("../assets/living-landscape-structures.svg");
 }
 
 module rear_magnet_pocket(x, y) {
