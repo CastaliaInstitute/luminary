@@ -271,7 +271,9 @@ def build():
 
     # Landscape P4 at the very back of the fixed 2 in box. It mounts just ahead
     # of the printed rear plate, leaving real depth for the shadow layers.
-    center_z = 62.0
+    # All optical and printed components share the 7 x 5 in door centerline.
+    # This prevents the display/relief from drifting inside the sight aperture.
+    center_z = 63.5
     display_y = 42.0
     cube("7 inch landscape LCD body and bezel", (0, display_y, center_z), (164.28, 4.02, 99.17), lcd_body, bevel=2.5)
     display_image_plane("generated sky and sea on display", (0, display_y - 2.08, center_z),
@@ -290,8 +292,10 @@ def build():
     cube("frame left", (-84, 25.4, center_z), (11, 50.8, 105), frame, bevel=2.5)
     cube("frame right", (84, 25.4, center_z), (11, 50.8, 105), frame, bevel=2.5)
 
-    # Hinged 7 x 5 in front door. Its 0.75 in rails are the wood "mat": no
-    # separate cardboard/brown insert exists. The opening is 5.5 x 3.5 in.
+    # Hinged 7 x 5 in front door. Its 0.75 in rails are wood, never a separate
+    # cardboard/brown insert. The glass pane remains 5.5 x 3.5 in; a 1/8 in
+    # painted-wood sight mat immediately behind it hides the P4 bezel while
+    # retaining a 5.25 x 3.25 in active viewing aperture.
     door_depth = 25.4  # 1 in deep hinged wood door
     door_y = -door_depth / 2  # rear face flush with the box front at Y = 0
     door_rail = 19.05
@@ -307,6 +311,19 @@ def build():
     cube("door right wood rail", ((door_outer_w - door_rail) / 2, door_y, door_center_z),
          (door_rail, door_depth, 88.9), frame, bevel=1.6)
     cube("door glass", (0, -door_depth - 0.3, door_center_z), (139.7, 0.6, 88.9), glass)
+    sight_outer_w, sight_outer_h, sight_depth = 139.7, 88.9, 3.2
+    sight_open_w, sight_open_h = 133.35, 82.55
+    sight_y = -door_depth + sight_depth / 2 + 0.35
+    sight_rail_x = (sight_outer_w - sight_open_w) / 2
+    sight_rail_z = (sight_outer_h - sight_open_h) / 2
+    cube("inner sight mat top", (0, sight_y, door_center_z + (sight_outer_h - sight_rail_z) / 2),
+         (sight_outer_w, sight_depth, sight_rail_z), frame, bevel=0.45)
+    cube("inner sight mat bottom", (0, sight_y, door_center_z - (sight_outer_h - sight_rail_z) / 2),
+         (sight_outer_w, sight_depth, sight_rail_z), frame, bevel=0.45)
+    cube("inner sight mat left", (-(sight_outer_w - sight_rail_x) / 2, sight_y, door_center_z),
+         (sight_rail_x, sight_depth, sight_open_h), frame, bevel=0.45)
+    cube("inner sight mat right", ((sight_outer_w - sight_rail_x) / 2, sight_y, door_center_z),
+         (sight_rail_x, sight_depth, sight_open_h), frame, bevel=0.45)
     for x in (-52, 52):
         bottom_butt_hinge(x, hinge)
 

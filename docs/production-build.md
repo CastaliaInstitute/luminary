@@ -17,7 +17,10 @@ test indicates otherwise:
 
 The landscape shadow box has a 7 x 5 x 2 in outer enclosure and a hinged,
 1 in deep front door. Its distressed-white wood door rails are 0.75 in wide
-and frame the 5.5 x 3.5 in glass opening; there is no separate mat material.
+and frame the 5.5 x 3.5 in glass opening. A 1/8 in deep matching wood
+sight-mat sits immediately behind the glass, reducing the visible LCD aperture
+to 5.25 x 3.25 in so the P4 bezel and image edge remain hidden; it is wood,
+not a separate cardboard/brown mat material.
 Two small aged-metal butt hinges mount along the lower horizontal door/frame
 seam, each with a horizontal barrel and four visible screw heads.
 The P4 sits at the rear, behind the full scene background. Total printed scene
