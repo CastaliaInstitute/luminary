@@ -15,20 +15,23 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "renders")
 DISPLAY_BACKGROUND = os.path.join(ROOT, "assets", "display-sky-sea-1280x720.png")
 STL_DIR = os.path.join(ROOT, "renders", "stl")
+FRAME_TEXTURE = os.path.join(ROOT, "assets", "textures", "distressed-white-reclaimed-wood-v1.png")
 SILHOUETTE_CARRIER_STL = os.path.join(STL_DIR, "luminary-silhouette-carrier.stl")
 SILHOUETTE_STL = os.path.join(STL_DIR, "luminary-silhouette.stl")
 STRUCTURES_STL = os.path.join(STL_DIR, "luminary-structures.stl")
+P4_BACKPLATE_STL = os.path.join(STL_DIR, "luminary-7in-p4-backplate.stl")
 SCENE_VARIANT = os.environ.get("LUMINARY_SCENE", "luminary")
 
 # Nubble uses the three user-approved AI-separated masks as distinct opaque
 # parts.  The generated LCD image remains the sky-and-sea background.
 if SCENE_VARIANT == "nubble":
-    DISPLAY_BACKGROUND = os.path.join(ROOT, "assets", "display-nubble-1280x720.png")
+    # The LCD remains native 1280x720.  The physical 5.5x3.5 scene crop is
+    # defined by the relief/mat, while the unused side margins read as bezel.
+    DISPLAY_BACKGROUND = os.path.join(ROOT, "scenes", "nubble-aligned", "background.png")
     PRINTED_PARTS = [
-        ("hidden magnetic frame", os.path.join(STL_DIR, "nubble-magnetic-frame.stl"), "carrier"),
-        ("Nubble island layer", os.path.join(STL_DIR, "nubble-island-layer.stl"), "dark"),
-        ("Nubble breaker-rock layer", os.path.join(STL_DIR, "nubble-breaker-layer.stl"), "rock"),
-        ("Nubble foreground-rock layer", os.path.join(STL_DIR, "nubble-foreground-layer.stl"), "dark"),
+        ("Nubble bas-relief island", os.path.join(STL_DIR, "nubble-basrelief-island.stl"), "dark"),
+        ("Nubble bas-relief breaker", os.path.join(STL_DIR, "nubble-basrelief-breaker.stl"), "rock"),
+        ("Nubble bas-relief foreground", os.path.join(STL_DIR, "nubble-basrelief-foreground.stl"), "dark"),
     ]
 else:
     PRINTED_PARTS = [
@@ -107,34 +110,30 @@ def clear_glass_material():
 
 
 def distressed_white_frame():
-    """Warm white paint rubbed through to brown wood grain."""
-    m = mat("distressed white painted wood", (0.78, 0.75, 0.67, 1), roughness=0.72,
-            emission=(0.035, 0.03, 0.022, 1), strength=0.12)
+    """Generated seamless reclaimed-wood scan, with restrained physical relief."""
+    m = mat("distressed white painted wood", (0.82, 0.79, 0.70, 1), roughness=0.64)
     nodes = m.node_tree.nodes
     links = m.node_tree.links
     bsdf = nodes.get("Principled BSDF")
-    noise = nodes.new("ShaderNodeTexNoise")
-    noise.inputs["Scale"].default_value = 5.5
-    noise.inputs["Detail"].default_value = 8.0
-    noise.inputs["Roughness"].default_value = 0.78
-    ramp = nodes.new("ShaderNodeValToRGB")
-    ramp.color_ramp.elements[0].position = 0.24
-    ramp.color_ramp.elements[0].color = (0.16, 0.065, 0.025, 1)
-    ramp.color_ramp.elements[1].position = 0.70
-    ramp.color_ramp.elements[1].color = (0.98, 0.93, 0.81, 1)
-    worn = ramp.color_ramp.elements.new(0.39)
-    worn.color = (0.30, 0.13, 0.055, 1)
-    paint = ramp.color_ramp.elements.new(0.52)
-    paint.color = (0.88, 0.82, 0.69, 1)
-    links.new(noise.outputs["Fac"], ramp.inputs["Fac"])
-    links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])
+    texcoord = nodes.new("ShaderNodeTexCoord")
+    mapping = nodes.new("ShaderNodeMapping")
+    mapping.inputs["Scale"].default_value = (2.6, 2.6, 2.6)
+    image = nodes.new("ShaderNodeTexImage")
+    image.image = bpy.data.images.load(FRAME_TEXTURE, check_existing=True)
+    image.interpolation = "Linear"
+    image.projection = "BOX"
+    image.projection_blend = 0.22
+    bright = nodes.new("ShaderNodeHueSaturation")
+    bright.inputs["Value"].default_value = 1.28
+    links.new(texcoord.outputs["Generated"], mapping.inputs["Vector"])
+    links.new(mapping.outputs["Vector"], image.inputs["Vector"])
+    links.new(image.outputs["Color"], bright.inputs["Color"])
+    links.new(bright.outputs["Color"], bsdf.inputs["Base Color"])
     bump = nodes.new("ShaderNodeBump")
-    bump.inputs["Strength"].default_value = 0.30
-    bump.inputs["Distance"].default_value = 0.22
-    links.new(noise.outputs["Fac"], bump.inputs["Height"])
+    bump.inputs["Strength"].default_value = 0.18
+    bump.inputs["Distance"].default_value = 0.16
+    links.new(image.outputs["Color"], bump.inputs["Height"])
     links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
-    bsdf.inputs["Emission Color"].default_value = (0.42, 0.39, 0.32, 1)
-    bsdf.inputs["Emission Strength"].default_value = 0.45
     return m
 
 
@@ -202,6 +201,22 @@ def disk(name, loc, radius, material, depth=0.8):
     return ob
 
 
+def bottom_butt_hinge(x, material):
+    """Small two-leaf butt hinge at the lower door/frame seam."""
+    # Each leaf is a compact metal plate on one side of the 1 in door joint;
+    # the barrel runs horizontally, as on the supplied shadow-box reference.
+    cube("bottom hinge door leaf", (x, -1.7, 8.0), (18.0, 1.2, 11.0), material, bevel=0.5)
+    cube("bottom hinge case leaf", (x, 1.7, 8.0), (18.0, 1.2, 11.0), material, bevel=0.5)
+    bpy.ops.mesh.primitive_cylinder_add(vertices=24, radius=2.0, depth=18.0,
+                                        location=(x, 0, 3.8), rotation=(0, math.pi / 2, 0))
+    barrel = bpy.context.object
+    barrel.name = "horizontal butt-hinge barrel"
+    barrel.data.materials.append(material)
+    for sx in (-5.5, 5.5):
+        for sy in (-2.35, 2.35):
+            disk("hinge screw head", (x + sx, sy, 8.0), 1.05, material, depth=0.45)
+
+
 def display_image_plane(name, loc, width, height, material):
     # Plane is oriented toward the camera on the front (-Y) face of the LCD.
     bpy.ops.mesh.primitive_plane_add(size=2, location=loc, rotation=(math.pi / 2, 0, 0))
@@ -254,68 +269,62 @@ def build():
     display_image = display_image_material(DISPLAY_BACKGROUND)
     clear_carrier = clear_petg_material()
 
-    # The physical display: sky and water are intentionally behind all relief.
-    # Fixed 2 in box depth, with a 20 mm silhouette-to-screen allocation.
-    # Keep the LCD close to the relief: at the intended three-quarter viewing
-    # angle, a larger gap makes the source-registered masks visibly drift from
-    # their sky, horizon, and breaking-wave landmarks.
-    display_y = 14.5
-    cube("LCD body and bezel", (0, display_y, 62), (126.9, 3.5, 70.7), lcd_body, bevel=2.5)
-    display_image_plane("generated sky and sea on display", (0, display_y - 1.78, 62),
-                        110.32, 62.28, display_image)
-    # Rear mechanical architecture: a full 5x7 printed plate with a shallow
-    # 4x6 registration land behind the P4/display stack.
-    cube("printed 5x7 rear plate", (0, 49.3, 62), (177.8, 3.0, 127.0), dark, bevel=3.0)
-    cube("shallow 4x6 rear registration land", (0, 46.8, 62), (152.4, 1.0, 101.6), rock, bevel=1.0)
+    # Landscape P4 at the very back of the fixed 2 in box. It mounts just ahead
+    # of the printed rear plate, leaving real depth for the shadow layers.
+    center_z = 62.0
+    display_y = 42.0
+    cube("7 inch landscape LCD body and bezel", (0, display_y, center_z), (164.28, 4.02, 99.17), lcd_body, bevel=2.5)
+    display_image_plane("generated sky and sea on display", (0, display_y - 2.08, center_z),
+                        154.58, 86.42, display_image)
     # Import the exact printable meshes, never render-only silhouette proxies.
+    # The rear plate is positioned with its rear face flush to the 2 in box.
+    import_print_stl("printed 7 in P4 rear backplate", P4_BACKPLATE_STL, dark,
+                     (0, 50.8, center_z))
     materials = {"carrier": clear_carrier, "dark": dark, "rock": rock, "white": white}
     for name, filepath, material in PRINTED_PARTS:
-        import_print_stl(name, filepath, materials[material], (0, 5.0, 62))
+        import_print_stl(name, filepath, materials[material], (0, 5.0, center_z))
 
-    # Frame and glass. The frame is intentionally oversized around the nominal 6x4 opening.
+    # Landscape 7x5 frame.
     cube("frame top", (0, 25.4, 116), (178, 50.8, 11), frame, bevel=2.5)
     cube("frame bottom", (0, 25.4, 8), (178, 50.8, 11), frame, bevel=2.5)
-    cube("frame left", (-84, 25.4, 62), (11, 50.8, 105), frame, bevel=2.5)
-    cube("frame right", (84, 25.4, 62), (11, 50.8, 105), frame, bevel=2.5)
+    cube("frame left", (-84, 25.4, center_z), (11, 50.8, 105), frame, bevel=2.5)
+    cube("frame right", (84, 25.4, center_z), (11, 50.8, 105), frame, bevel=2.5)
 
-    # Hinged front door: shallow distressed-wood frame and clear glass. It sits
-    # proud of the 2 in case and is intentionally separate from printed parts.
-    door_y = -3.0
-    cube("door top rail", (0, door_y, 119), (170, 5.0, 8), frame, bevel=1.6)
-    cube("door bottom rail", (0, door_y, 5), (170, 5.0, 8), frame, bevel=1.6)
-    cube("door left rail", (-81, door_y, 62), (8, 5.0, 114), frame, bevel=1.6)
-    cube("door right rail", (81, door_y, 62), (8, 5.0, 114), frame, bevel=1.6)
-    # The actual glass is 4.5 × 3.5 in. A warm wood mat hides the larger 4 × 6
-    # silhouette carrier and defines the true visible aperture.
-    mat_y = door_y - 2.7
-    cube("wood mat top", (0, mat_y, 109.45), (152.4, 1.6, 6.35), wood_mat)
-    cube("wood mat bottom", (0, mat_y, 14.55), (152.4, 1.6, 6.35), wood_mat)
-    cube("wood mat left", (-66.675, mat_y, 62), (19.05, 1.6, 88.9), wood_mat)
-    cube("wood mat right", (66.675, mat_y, 62), (19.05, 1.6, 88.9), wood_mat)
-    cube("door glass", (0, door_y - 3.6, 62), (114.3, 0.6, 88.9), glass)
-    for z in (31, 93):
-        bpy.ops.mesh.primitive_cylinder_add(vertices=24, radius=2.2, depth=11,
-                                            location=(-85, door_y - 2.6, z))
-        h = bpy.context.object
-        h.name = "door hinge"
-        h.rotation_euler = (math.pi / 2, 0, 0)
-        h.data.materials.append(hinge)
+    # Hinged 7 x 5 in front door. Its 0.75 in rails are the wood "mat": no
+    # separate cardboard/brown insert exists. The opening is 5.5 x 3.5 in.
+    door_depth = 25.4  # 1 in deep hinged wood door
+    door_y = -door_depth / 2  # rear face flush with the box front at Y = 0
+    door_rail = 19.05
+    door_outer_w = 177.8
+    door_outer_h = 127.0
+    door_center_z = door_outer_h / 2
+    cube("door top wood rail", (0, door_y, door_outer_h - door_rail / 2),
+         (door_outer_w, door_depth, door_rail), frame, bevel=1.6)
+    cube("door bottom wood rail", (0, door_y, door_rail / 2),
+         (door_outer_w, door_depth, door_rail), frame, bevel=1.6)
+    cube("door left wood rail", (-(door_outer_w - door_rail) / 2, door_y, door_center_z),
+         (door_rail, door_depth, 88.9), frame, bevel=1.6)
+    cube("door right wood rail", ((door_outer_w - door_rail) / 2, door_y, door_center_z),
+         (door_rail, door_depth, 88.9), frame, bevel=1.6)
+    cube("door glass", (0, -door_depth - 0.3, door_center_z), (139.7, 0.6, 88.9), glass)
+    for x in (-52, 52):
+        bottom_butt_hinge(x, hinge)
 
     # Ground plane and lighting.
     ground = mat("ground", (0.055, 0.06, 0.055, 1), roughness=0.85)
     cube("ground", (0, 45, -3), (500, 500, 4), ground)
-    bpy.ops.object.light_add(type="AREA", location=(-100, -260, 220))
+    bpy.ops.object.light_add(type="AREA", location=(-120, -220, 240))
     key = bpy.context.object
     key.name = "softbox key"
-    key.data.energy = 1450
+    key.data.energy = 4200
     key.data.shape = 'DISK'
     key.data.size = 180
-    look_at(key, (0, 0, 55))
-    bpy.ops.object.light_add(type="AREA", location=(110, -180, 120))
+    look_at(key, (0, 0, center_z))
+    bpy.ops.object.light_add(type="AREA", location=(130, -180, 145))
     fill = bpy.context.object
-    fill.data.energy = 700
+    fill.data.energy = 2400
     fill.data.size = 100
-    look_at(fill, (0, 0, 55))
+    look_at(fill, (0, 0, center_z))
 
     # Blue screen spill across the relief, plus a warm local lighthouse glow.
     bpy.ops.object.light_add(type="AREA", location=(0, -45, 72))
@@ -324,8 +333,8 @@ def build():
     screen_spill.data.energy = 240
     screen_spill.data.color = (0.12, 0.38, 0.55)
     screen_spill.data.size = 110
-    look_at(screen_spill, (0, 0, 52))
-    bpy.ops.object.light_add(type="POINT", location=(0, -24, 74))
+    look_at(screen_spill, (0, 0, center_z))
+    bpy.ops.object.light_add(type="POINT", location=(0, -24, center_z + 12))
     beacon = bpy.context.object
     beacon.name = "warm lighthouse beacon spill"
     beacon.data.energy = 55
@@ -335,18 +344,18 @@ def build():
     # Camera.
     # Slight three-quarter angle to reveal frame depth and layered relief.
     # Strong enough perspective to expose the 35 mm relief-to-display stack.
-    bpy.ops.object.camera_add(location=(120, -440, 102))
+    bpy.ops.object.camera_add(location=(78, -480, 82))
     cam = bpy.context.object
-    cam.data.lens = 68
+    cam.data.lens = 65
     cam.data.sensor_width = 36
-    look_at(cam, (0, 0, 60))
+    look_at(cam, (0, 0, center_z))
     bpy.context.scene.camera = cam
 
     world = bpy.context.scene.world
     world.color = (0.008, 0.012, 0.014)
     world.use_nodes = True
-    world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.022, 0.028, 0.03, 1)
-    world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.55
+    world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.11, 0.12, 0.12, 1)
+    world.node_tree.nodes["Background"].inputs["Strength"].default_value = 1.0
 
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
@@ -361,7 +370,7 @@ def build():
     output_name = "nubble-concept" if SCENE_VARIANT == "nubble" else "luminary-concept"
     scene.render.filepath = os.path.join(OUT, output_name + ".png")
     scene.render.film_transparent = False
-    scene.view_settings.look = "AgX - Medium High Contrast"
+    scene.view_settings.look = "AgX - Medium Low Contrast"
     scene.render.image_settings.color_mode = "RGBA"
     bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, output_name + ".blend"))
     bpy.ops.render.render(write_still=True)

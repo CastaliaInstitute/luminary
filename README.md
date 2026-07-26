@@ -4,8 +4,8 @@ CastaliaInstitute project repository for **Luminary**, an illuminated coastal sh
 
 ## Status
 
-Printable prototype and STL-based product render complete. This repository is the source of
-truth for the Luminary project.
+Production-candidate STL package and STL-based render are ready for physical P4 fit testing.
+This repository is the source of truth for the Luminary project.
 
 ## Repository layout
 
@@ -24,8 +24,9 @@ truth for the Luminary project.
 The project page is published at [luminary.castalia.institute](https://luminary.castalia.institute).
 
 Open `cad/lightbox.scad` in OpenSCAD to inspect or export the current parametric model.
-The latest concept render is `renders/luminary-concept.png`; the editable Blender scene is
-`renders/luminary-concept.blend`.
+The latest production-candidate render is `renders/nubble-concept.png`; the editable Blender
+scene is `renders/nubble-concept.blend`. The release print set and physical assembly notes are
+in [`docs/production-build.md`](docs/production-build.md).
 
 For new scenes, follow the [landscape photo workflow](docs/landscape-photo-workflow.md).
 It defines the AI background-fill, source-faithful silhouette, SVG, print-validation, and
