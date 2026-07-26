@@ -110,7 +110,8 @@ module dark_silhouette_panel() {
             linear_extrude(height = nozzle_d * scene_base_layers)
                 import("../assets/living-landscape-silhouette.svg");
 
-    // Raised foreground gives the rocks and surf a stronger shadow line.
+    // Raised foreground gives the rocks a stronger shadow line. Water and surf
+    // remain open so the display can render motion and changing light.
     if (scene_art)
         translate([-panel_w / 2 + panel_border, -panel_h / 2 + panel_border, nozzle_d * scene_base_layers])
             linear_extrude(height = nozzle_d * scene_foreground_layers)

@@ -50,15 +50,15 @@ centered on the origin so it can be aligned with a future SVG-derived landscape 
 
 ## Silhouette composition
 
-The added SVG is a first-pass interpretation of the supplied coastal photograph, not a
-pixel trace. It emphasizes a low island, two cottages, the lighthouse and lantern,
-separated surf bands, and larger foreground rocks. The white cutouts are intentional
-openings for the animated display to show through.
+The added SVG is a first-pass silhouette interpretation of the supplied coastal photograph,
+not a pixel trace. It retains the low island and larger foreground rocks, while the separate
+structures layer retains the lighthouse and cottages. Sky, water, and surf are intentionally
+omitted so the display can provide those elements and their animation.
 
 ## Relief strategy
 
 The silhouette is designed around a 0.2 mm nozzle: the base scene is 4 layers (0.8 mm),
-and the foreground rocks/surf are raised another 8 layers (1.6 mm total). The lighthouse and
+and the foreground rocks are raised another 8 layers (1.6 mm total). The lighthouse and
 cottage insert is a separate white-print part at 6 layers (1.2 mm). This keeps every thickness
 aligned to whole nozzle-width layer increments.
 

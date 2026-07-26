@@ -152,8 +152,6 @@ def build():
     prism("dark island silhouette", island, 2.0, 3.2, dark, bevel=0.8)
     foreground = [(-76, 33), (-63, 39), (-48, 35), (-37, 20), (-25, 15), (-8, 28), (7, 22), (18, 14), (36, 21), (52, 27), (67, 21), (76, 26), (76, 10), (-76, 10)]
     prism("raised foreground rocks", foreground, -2.0, 5.0, rock, bevel=1.0)
-    surf = [(-72, 40), (-46, 38), (-22, 41), (-2, 37), (18, 40), (42, 37), (72, 39), (72, 42), (42, 40), (19, 43), (-3, 40), (-23, 44), (-47, 41), (-72, 43)]
-    prism("raised surf edge", surf, -3.0, 4.0, rock, bevel=0.6)
 
     # White insert: lighthouse and cottages are deliberately separate from black relief.
     tower = [(-2.5, 51), (-2.0, 73), (2.0, 73), (2.5, 51)]
