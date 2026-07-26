@@ -28,6 +28,10 @@ magnet_dx = plate_w / 2 - 9.0;
 magnet_dy = plate_h / 2 - 9.0;
 
 cable_d = 8.0;
+// Keep each exit fully circular with a 1 mm structural wall at the plate edge.
+// The USB-C extension is connected internally; these holes only pass the cable.
+cable_edge_wall = 1.0;
+cable_edge_offset = cable_d / 2 + cable_edge_wall;
 
 module rounded_plate() {
     // The wood shadow box hides the plate perimeter, so a plain rectangular
@@ -69,8 +73,10 @@ module backplate() {
 
         // Either cable route can be used: side for a wall install, bottom for
         // a tabletop orientation. The unused opening remains behind the box.
-        translate([-plate_w / 2 + 3.5, 0, -0.01]) cylinder(d = cable_d, h = plate_t + 0.02);
-        translate([0, -plate_h / 2 + 3.5, -0.01]) cylinder(d = cable_d, h = plate_t + 0.02);
+        translate([-plate_w / 2 + cable_edge_offset, 0, -0.01])
+            cylinder(d = cable_d, h = plate_t + 0.02);
+        translate([0, -plate_h / 2 + cable_edge_offset, -0.01])
+            cylinder(d = cable_d, h = plate_t + 0.02);
     }
 }
 

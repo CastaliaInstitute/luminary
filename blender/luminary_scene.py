@@ -21,6 +21,7 @@ SILHOUETTE_STL = os.path.join(STL_DIR, "luminary-silhouette.stl")
 STRUCTURES_STL = os.path.join(STL_DIR, "luminary-structures.stl")
 P4_BACKPLATE_STL = os.path.join(STL_DIR, "luminary-7in-p4-backplate.stl")
 SCENE_VARIANT = os.environ.get("LUMINARY_SCENE", "luminary")
+RENDER_VIEW = os.environ.get("LUMINARY_VIEW", "front")
 
 # Nubble uses the three user-approved AI-separated masks as distinct opaque
 # parts.  The generated LCD image remains the sky-and-sea background.
@@ -257,6 +258,7 @@ def build():
 
     dark = mat("matte black PLA", (0.035, 0.055, 0.058, 1), roughness=0.78,
                emission=(0.015, 0.022, 0.024, 1), strength=0.2)
+    rear_plate = mat("matte black rear plate", (0.085, 0.105, 0.105, 1), roughness=0.67)
     rock = textured_rock_material()
     white = mat("matte white lighthouse", (1.0, 0.99, 0.94, 1), roughness=0.52,
                 emission=(0.42, 0.40, 0.34, 1), strength=1.0)
@@ -280,7 +282,7 @@ def build():
                         154.58, 86.42, display_image)
     # Import the exact printable meshes, never render-only silhouette proxies.
     # The rear plate is positioned with its rear face flush to the 2 in box.
-    import_print_stl("printed 7 in P4 rear backplate", P4_BACKPLATE_STL, dark,
+    import_print_stl("printed 7 in P4 rear backplate", P4_BACKPLATE_STL, rear_plate,
                      (0, 50.8, center_z))
     materials = {"carrier": clear_carrier, "dark": dark, "rock": rock, "white": white}
     for name, filepath, material in PRINTED_PARTS:
@@ -358,14 +360,39 @@ def build():
     beacon.data.color = (1.0, 0.34, 0.08)
     beacon.data.shadow_soft_size = 12
 
-    # Camera.
-    # Slight three-quarter angle to reveal frame depth and layered relief.
-    # Strong enough perspective to expose the 35 mm relief-to-display stack.
-    bpy.ops.object.camera_add(location=(78, -480, 82))
+    if RENDER_VIEW == "rear":
+        # The product lights are intentionally front-biased. Add a dedicated
+        # softbox pair only for the rear assembly verification view, where the
+        # matte-black printed plate and its recessed details must be legible.
+        bpy.ops.object.light_add(type="AREA", location=(-115, 250, 190))
+        rear_key = bpy.context.object
+        rear_key.name = "rear verification softbox"
+        rear_key.data.energy = 4400
+        rear_key.data.shape = 'DISK'
+        rear_key.data.size = 150
+        look_at(rear_key, (0, 50, center_z))
+        bpy.ops.object.light_add(type="AREA", location=(145, 180, 90))
+        rear_fill = bpy.context.object
+        rear_fill.name = "rear verification fill"
+        rear_fill.data.energy = 2000
+        rear_fill.data.size = 110
+        look_at(rear_fill, (0, 50, center_z))
+
+    # Camera. The front view is a product render; the rear view is an
+    # assembly-verification image of the exact imported rear-plate STL.
+    if RENDER_VIEW == "rear":
+        camera_location = (-118, 430, 105)
+        camera_target = (0, 49.5, center_z)
+    else:
+        # Slight three-quarter angle to reveal frame depth and layered relief.
+        # Strong enough perspective to expose the 35 mm relief-to-display stack.
+        camera_location = (78, -480, 82)
+        camera_target = (0, 0, center_z)
+    bpy.ops.object.camera_add(location=camera_location)
     cam = bpy.context.object
     cam.data.lens = 65
     cam.data.sensor_width = 36
-    look_at(cam, (0, 0, center_z))
+    look_at(cam, camera_target)
     bpy.context.scene.camera = cam
 
     world = bpy.context.scene.world
@@ -385,6 +412,8 @@ def build():
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "PNG"
     output_name = "nubble-concept" if SCENE_VARIANT == "nubble" else "luminary-concept"
+    if RENDER_VIEW == "rear":
+        output_name += "-rear-assembly"
     scene.render.filepath = os.path.join(OUT, output_name + ".png")
     scene.render.film_transparent = False
     scene.view_settings.look = "AgX - Medium Low Contrast"
