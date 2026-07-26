@@ -34,6 +34,7 @@ usb_side = "left"; // "left" or "right"
 usb_cable_cutout_d = 8.0; // small circular cable pass-through
 usb_cutout_y = 0.0;
 usb_edge_clearance = 3.0;
+usb_bottom_edge_clearance = 3.0;
 
 // Printed silhouette panel
 silhouette_t = 0.80;
@@ -147,9 +148,10 @@ module p4_mount_standoff(x, y) {
 }
 
 module rear_backplate() {
-    usb_cutout_x = usb_side == "left"
+    usb_side_cutout_x = usb_side == "left"
         ? -frame_outer_w / 2 + usb_cable_cutout_d / 2 + usb_edge_clearance
         : frame_outer_w / 2 - usb_cable_cutout_d / 2 - usb_edge_clearance;
+    usb_bottom_cutout_y = -frame_outer_h / 2 + usb_cable_cutout_d / 2 + usb_bottom_edge_clearance;
     difference() {
         // Full 5x7 plate, aligned with the shadow-box exterior.
         translate([-frame_outer_w / 2, -frame_outer_h / 2, 0])
@@ -161,7 +163,11 @@ module rear_backplate() {
 
         // Small circular cable access opening. The USB-C connector remains
         // internal; only the cable exits through the printed back.
-        translate([usb_cutout_x, usb_cutout_y, backplate_t / 2])
+        translate([usb_side_cutout_x, usb_cutout_y, backplate_t / 2])
+            cylinder(d = usb_cable_cutout_d, h = backplate_t + 0.2, center = true);
+
+        // Bottom-center access for tabletop placement and downward cable routing.
+        translate([0, usb_bottom_cutout_y, backplate_t / 2])
             cylinder(d = usb_cable_cutout_d, h = backplate_t + 0.2, center = true);
     }
 

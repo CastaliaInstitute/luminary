@@ -25,7 +25,7 @@
 | Silhouette-to-display air gap | 2–3 mm | Design brief |
 | Printed rear plate | 177.8 × 127.0 mm (5 × 7 in) | New mechanical requirement |
 | Shallow rear registration land | 152.4 × 101.6 mm (4 × 6 in) | New mechanical requirement |
-| USB-C cable pass-through | 8 mm circular default | New mechanical requirement |
+| USB-C cable pass-throughs | 8 mm circular default, side + bottom-center | New mechanical requirement |
 | Silhouette magnet reference | 3 × 1 mm magnet pocket, 4 corners | Design brief |
 | Glass steel squares | 1/4 × 1/4 in, 4 corners | New mechanical requirement |
 
@@ -88,8 +88,9 @@ The rear of the object is now a printed 5 × 7 plate. A shallow 4 × 6 registrat
 the display close to the frame back while providing a mounting datum for the P4/display
 assembly. Four rear-facing pockets accept magnets that
 mate with steel plates bonded to the inside back of the shadow-box frame. The default USB-C
-access is a small circular pass-through in the left side of the printed back; the connector
-stays internal and the cable routes through the hole. Its diameter and edge offset are
+access is provided by two small circular pass-throughs in the printed back: one on the side
+for wall mounting and one centered along the bottom for tabletop placement. The connector
+stays internal and the cable routes through the selected hole. Diameter and edge offsets are
 parameterized for the actual cable or grommet.
 
 The removable silhouette is retained separately by four 3 × 1 mm magnets in its corner
