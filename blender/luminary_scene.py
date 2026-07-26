@@ -189,9 +189,10 @@ def build():
     look_at(fill, (0, 0, 55))
 
     # Camera.
-    bpy.ops.object.camera_add(location=(0, -330, 69))
+    # Slight three-quarter angle to reveal frame depth and layered relief.
+    bpy.ops.object.camera_add(location=(150, -320, 96))
     cam = bpy.context.object
-    cam.data.lens = 58
+    cam.data.lens = 62
     cam.data.sensor_width = 36
     look_at(cam, (0, 0, 60))
     bpy.context.scene.camera = cam
