@@ -158,14 +158,14 @@ def build():
     cloud = mat("cloud glow", (0.76, 0.83, 0.86, 1), roughness=0.7, emission=(0.45, 0.58, 0.65, 1), strength=0.35)
 
     # The physical display: sky and water are intentionally behind all relief.
-    # The physical silhouette is 44.45 mm in front of the display.
-    display_y = 46.5
+    # Fixed 2 in box depth, with a 35 mm silhouette-to-screen allocation.
+    display_y = 38.5
     cube("display glass / sky", (0, display_y, 62), (126.9, 3.5, 70.7), sky, bevel=2.5)
     cube("display ocean", (0, display_y - 2.0, 42), (122, 1.0, 27), ocean)
     # Rear mechanical architecture: a full 5x7 printed plate with a shallow
     # 4x6 registration land behind the P4/display stack.
-    cube("printed 5x7 rear plate", (0, display_y + 22, 62), (177.8, 5.0, 127.0), dark, bevel=3.0)
-    cube("shallow 4x6 rear registration land", (0, display_y + 18.5, 62), (152.4, 1.0, 101.6), rock, bevel=1.0)
+    cube("printed 5x7 rear plate", (0, 49.3, 62), (177.8, 3.0, 127.0), dark, bevel=3.0)
+    cube("shallow 4x6 rear registration land", (0, 46.8, 62), (152.4, 1.0, 101.6), rock, bevel=1.0)
     disk("display moon", (-37, display_y - 3.3, 78), 7, warm, depth=0.4)
     for x, z, sx in [(-22, 86, 15), (4, 88, 11), (28, 81, 17)]:
         bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, location=(x, display_y - 3.7, z))
@@ -177,24 +177,24 @@ def build():
 
     # Dark base relief, in front of the screen.
     island = [(-71, 52), (-55, 47), (-31, 48), (-8, 44), (18, 46), (41, 48), (71, 53), (71, 62), (-71, 62)]
-    prism("dark island silhouette", island, 2.0, 3.2, dark, bevel=0.8)
+    prism("dark island silhouette", island, 5.0, 3.2, dark, bevel=0.8)
     foreground = [(-76, 33), (-63, 39), (-48, 35), (-37, 20), (-25, 15), (-8, 28), (7, 22), (18, 14), (36, 21), (52, 27), (67, 21), (76, 26), (76, 10), (-76, 10)]
-    prism("raised foreground rocks", foreground, -2.0, 5.0, rock, bevel=1.0)
+    prism("raised foreground rocks", foreground, 3.5, 5.0, rock, bevel=1.0)
 
     # White insert: lighthouse and cottages are deliberately separate from black relief.
     tower = [(-2.5, 51), (-2.0, 73), (2.0, 73), (2.5, 51)]
-    prism("white lighthouse tower", tower, -5.0, 3.0, white, bevel=0.35)
-    prism("white lighthouse keeper house", [(-8, 51), (-8, 59), (0, 66), (8, 59), (8, 51)], -5.0, 3.0, white, bevel=0.45)
-    cube("lighthouse lantern room", (0, -6.0, 74), (7, 3.2, 2.8), white, bevel=0.5)
-    cube("lighthouse beacon opening", (0, -7.8, 74), (3.0, 0.4, 1.3), warm, bevel=0.25)
+    prism("white lighthouse tower", tower, 2.0, 3.0, white, bevel=0.35)
+    prism("white lighthouse keeper house", [(-8, 51), (-8, 59), (0, 66), (8, 59), (8, 51)], 2.0, 3.0, white, bevel=0.45)
+    cube("lighthouse lantern room", (0, 1.0, 74), (7, 3.2, 2.8), white, bevel=0.5)
+    cube("lighthouse beacon opening", (0, -0.8, 74), (3.0, 0.4, 1.3), warm, bevel=0.25)
     for x, z, s in [(30, 53, 8), (42, 51, 6)]:
-        prism("white island cottage", [(x - s / 2, z), (x - s / 2, z + 7), (x, z + 12), (x + s / 2, z + 7), (x + s / 2, z)], -4.5, 2.5, white, bevel=0.35)
+        prism("white island cottage", [(x - s / 2, z), (x - s / 2, z + 7), (x, z + 12), (x + s / 2, z + 7), (x + s / 2, z)], 2.2, 2.5, white, bevel=0.35)
 
     # Frame and glass. The frame is intentionally oversized around the nominal 6x4 opening.
-    cube("frame top", (0, -10, 116), (178, 28, 11), frame, bevel=2.5)
-    cube("frame bottom", (0, -10, 8), (178, 28, 11), frame, bevel=2.5)
-    cube("frame left", (-84, -10, 62), (11, 28, 105), frame, bevel=2.5)
-    cube("frame right", (84, -10, 62), (11, 28, 105), frame, bevel=2.5)
+    cube("frame top", (0, 25.4, 116), (178, 50.8, 11), frame, bevel=2.5)
+    cube("frame bottom", (0, 25.4, 8), (178, 50.8, 11), frame, bevel=2.5)
+    cube("frame left", (-84, 25.4, 62), (11, 50.8, 105), frame, bevel=2.5)
+    cube("frame right", (84, 25.4, 62), (11, 50.8, 105), frame, bevel=2.5)
     # The real object has a glass door. It is omitted from this beauty render
     # so the camera can show the relief and display clearly without opaque-glass
     # color-management artifacts. Add a transparent glass shader for final
@@ -233,7 +233,7 @@ def build():
 
     # Camera.
     # Slight three-quarter angle to reveal frame depth and layered relief.
-    # Strong enough perspective to expose the 37 mm front-to-back stack.
+    # Strong enough perspective to expose the 35 mm relief-to-display stack.
     bpy.ops.object.camera_add(location=(260, -270, 125))
     cam = bpy.context.object
     cam.data.lens = 62

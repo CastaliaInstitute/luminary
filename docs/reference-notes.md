@@ -15,7 +15,7 @@
 
 | Feature | Value | Confidence |
 | --- | ---: | --- |
-| Nominal shadow-box exterior | 7 × 5 in (177.8 × 127.0 mm) | Design brief |
+| Nominal shadow-box exterior | 7 × 5 × 2 in (177.8 × 127.0 × 50.8 mm) | Design brief + measured depth |
 | Nominal interior / silhouette panel | 6 × 4 in (152.4 × 101.6 mm) | Design brief |
 | Waveshare display outer envelope | 126.90 × 70.70 mm | Product reference image |
 | Display active area | 110.32 × 62.28 mm | Product reference image |
@@ -23,7 +23,7 @@
 | Visible silhouette face | 0.8 mm | Design brief |
 | Hidden rear ribs | ~2 mm deep | Design brief |
 | Magnet reference | 3 × 1 mm neodymium | Design brief |
-| Silhouette-to-display depth | 44.45 mm (1.75 in) | New mechanical requirement |
+| Silhouette-to-display depth | 35 mm starting target | Design allocation, adjustable |
 | Printed rear plate | 177.8 × 127.0 mm (5 × 7 in) | New mechanical requirement |
 | Shallow rear registration land | 152.4 × 101.6 mm (4 × 6 in) | New mechanical requirement |
 | USB-C cable pass-throughs | 8 mm circular default, side + bottom-center | New mechanical requirement |
@@ -43,6 +43,11 @@ following need physical verification before printing a final carrier or enclosur
 - exact cable diameter, grommet choice, and cable bend radius;
 - exact P4 PCB hole coordinates and connector keep-outs;
 - steel plate thickness, position, and spacing relative to the silhouette magnet pockets.
+
+The 2 in outer depth is now the controlling dimension. The model uses a 35 mm
+silhouette-to-screen depth, preserving roughly 15 mm for the display carrier, P4 PCB,
+rear plate, and clearance. This is a fit allocation, not proof of fit; confirm the tallest
+P4-side component before printing.
 
 ## Usage
 

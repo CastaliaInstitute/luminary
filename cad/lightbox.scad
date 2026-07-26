@@ -11,6 +11,7 @@ part = "assembly";
 // Shadow-box envelope
 frame_outer_w = 177.8; // 7 in
 frame_outer_h = 127.0; // 5 in
+shadow_box_depth = 50.8; // 2 in overall depth
 panel_w = 152.4; // 6 in nominal interior
 panel_h = 101.6; // 4 in nominal interior
 
@@ -59,8 +60,9 @@ show_glass_hardware = true;
 // Carrier and stack-up assumptions; verify against the actual frame.
 carrier_t = 3.0;
 carrier_clearance = 1.5;
-display_gap = 44.45; // 1.75 in silhouette-to-display depth
-pcb_standoff_h = 4.0;
+// 35 mm leaves an ~15 mm rear electronics envelope inside a 2 in box.
+display_gap = 35.0;
+pcb_standoff_h = 2.5;
 
 module rounded_box(size, radius = 3) {
     hull() {
@@ -223,7 +225,8 @@ module assembly() {
     translate([0, 0, silhouette_t + display_gap]) display_model();
     translate([0, 0, silhouette_t + display_gap + 4.0 + 0.5]) carrier();
     translate([0, 0, silhouette_t + display_gap + 4.0 + 0.5 + carrier_t + pcb_standoff_h]) pcb_model();
-    translate([0, 0, silhouette_t + display_gap + 4.0 + 0.5 + carrier_t + pcb_standoff_h + 1.6]) rear_backplate();
+    // Rear plate terminates at the fixed 2 in outer depth.
+    translate([0, 0, shadow_box_depth - backplate_t]) rear_backplate();
 }
 
 if (part == "assembly") assembly();
