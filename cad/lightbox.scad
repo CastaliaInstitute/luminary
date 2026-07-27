@@ -2,30 +2,33 @@
 // Units: millimetres. Reference: docs/reference-notes.md
 //
 // Render one part at a time by changing `part` below:
-//   "assembly", "preview", "silhouette", "silhouette_carrier", "structures", "glass_hardware", "backplate", "carrier", "display", "pcb"
+//   "assembly", "preview", "silhouette", "silhouette_carrier", "structures", "glass_hardware", "backplate", "carrier", "display", "pcb", "p4", "p4_mask"
 
 $fn = 64;
 
 part = "assembly";
 
 // Shadow-box envelope
-frame_outer_w = 177.8; // 7 in
-frame_outer_h = 127.0; // 5 in
+frame_outer_w = 177.8; // 7 in landscape door
+frame_outer_h = 127.0; // 5 in landscape door
 shadow_box_depth = 50.8; // 2 in overall depth
-panel_w = 152.4; // 6 in nominal interior
-panel_h = 101.6; // 4 in nominal interior
-glass_visible_w = 114.3; // 4.5 in clear glass / mat opening
-glass_visible_h = 88.9;  // 3.5 in clear glass / mat opening
+scene_frame_w = 152.4; // 6 in hidden magnetic scene insert
+scene_frame_h = 101.6; // 4 in hidden magnetic scene insert
+p4_mount_w = 166.0;    // board is 164 mm wide; 1 mm relief each side
+p4_mount_h = 101.6;
+glass_visible_w = 139.7; // 5.5 in clear door window
+glass_visible_h = 88.9;  // 3.5 in clear door window
 
-// Waveshare ESP32-P4-WiFi6-Touch-LCD-5 reference dimensions
-display_w = 126.90;
-display_h = 70.70;
-active_w = 110.32;
-active_h = 62.28;
-pcb_w = 118.50;
-pcb_h = 64.50;
+// Waveshare ESP32-P4-WiFi6-Touch-LCD-7 reference dimensions (supplied 7 in outline).
+display_w = 164.28;
+display_h = 99.17;
+active_w = 154.58;
+active_h = 86.42;
+pcb_w = 164.00;
+pcb_h = 97.00;
 
-// Printed rear plate / mounting architecture
+// Printed rear plate / mounting architecture. Print in matte black PLA; this
+// is the structural P4 mounting plate, not a separate wood-frame backing.
 backplate_t = 3.0;
 insert_t = 1.0; // shallow registration land; keeps the display close to the frame back
 insert_border = 5.0;
@@ -69,9 +72,9 @@ show_glass_hardware = true;
 // Carrier and stack-up assumptions; verify against the actual frame.
 carrier_t = 3.0;
 carrier_clearance = 1.5;
-// 20 mm preserves shadow depth while reducing off-axis display parallax.
-// It leaves roughly 30 mm for the rear electronics envelope.
-display_gap = 20.0;
+// The P4 sits directly against the rear mounting architecture. The full box
+// depth is available for the layered relief, as it should be in a shadow box.
+display_gap = 35.0;
 pcb_standoff_h = 2.5;
 
 module rounded_box(size, radius = 3) {
@@ -109,17 +112,17 @@ module tapered_mount_frame(height = silhouette_t) {
     // Rigid outer portion: hidden beneath the door rabbet and strong enough to
     // carry the corner pods.
     linear_extrude(height = height)
-        frame_ring_2d(panel_w, panel_h,
-                      panel_w - 2 * (panel_border - tapered_edge_w),
-                      panel_h - 2 * (panel_border - tapered_edge_w));
+        frame_ring_2d(scene_frame_w, scene_frame_h,
+                      scene_frame_w - 2 * (panel_border - tapered_edge_w),
+                      scene_frame_h - 2 * (panel_border - tapered_edge_w));
 
     // The final 2 mm toward the clear window feathers away instead of creating
     // a hard visible frame edge.
     linear_extrude(height = height, scale = 0.94)
-        frame_ring_2d(panel_w - 2 * (panel_border - tapered_edge_w),
-                      panel_h - 2 * (panel_border - tapered_edge_w),
-                      panel_w - 2 * panel_border,
-                      panel_h - 2 * panel_border);
+        frame_ring_2d(scene_frame_w - 2 * (panel_border - tapered_edge_w),
+                      scene_frame_h - 2 * (panel_border - tapered_edge_w),
+                      scene_frame_w - 2 * panel_border,
+                      scene_frame_h - 2 * panel_border);
 }
 
 module glass_steel_square(x, y) {
@@ -130,8 +133,8 @@ module glass_steel_square(x, y) {
 }
 
 module glass_hardware() {
-    for (x = [-panel_w / 2 + steel_square_edge, panel_w / 2 - steel_square_edge])
-        for (y = [-panel_h / 2 + steel_square_edge, panel_h / 2 - steel_square_edge])
+    for (x = [-scene_frame_w / 2 + steel_square_edge, scene_frame_w / 2 - steel_square_edge])
+        for (y = [-scene_frame_h / 2 + steel_square_edge, scene_frame_h / 2 - steel_square_edge])
             glass_steel_square(x, y);
 }
 
@@ -141,16 +144,16 @@ module transparent_silhouette_carrier() {
     union() {
         // A simple closed ring is more reliable than the former coplanar taper.
         linear_extrude(height = silhouette_carrier_t)
-            frame_ring_2d(panel_w, panel_h,
-                          panel_w - 2 * panel_border,
-                          panel_h - 2 * panel_border);
+            frame_ring_2d(scene_frame_w, scene_frame_h,
+                          scene_frame_w - 2 * panel_border,
+                          scene_frame_h - 2 * panel_border);
 
         // Two hairline supports retain otherwise isolated foreground boulders.
         // They terminate under dark rock and remain visually absent over water.
         for (x = [-10, 34])
             linear_extrude(height = silhouette_carrier_t)
                 hull() {
-                    translate([x, -panel_h / 2 + panel_border + 0.2]) circle(d = 0.6);
+                    translate([x, -scene_frame_h / 2 + panel_border + 0.2]) circle(d = 0.6);
                 translate([x, -23]) circle(d = 0.6);
             }
 
@@ -160,13 +163,13 @@ module transparent_silhouette_carrier() {
         for (side = [-1, 1])
             linear_extrude(height = silhouette_carrier_t)
                 hull() {
-                    translate([side * (panel_w / 2 - panel_border + 1.0), 7]) circle(d = 0.6);
+                    translate([side * (scene_frame_w / 2 - panel_border + 1.0), 7]) circle(d = 0.6);
                     translate([side * 47.5, 7]) circle(d = 0.6);
                 }
 
         // Four hidden rear pods carry the magnets that couple to the steel squares.
-        for (x = [-panel_w / 2 + magnet_edge, panel_w / 2 - magnet_edge])
-            for (y = [-panel_h / 2 + magnet_edge, panel_h / 2 - magnet_edge])
+        for (x = [-scene_frame_w / 2 + magnet_edge, scene_frame_w / 2 - magnet_edge])
+            for (y = [-scene_frame_h / 2 + magnet_edge, scene_frame_h / 2 - magnet_edge])
                 corner_magnet_pod(x, y);
     }
 }
@@ -199,13 +202,10 @@ module rear_magnet_pocket(x, y) {
         cylinder(d = rear_magnet_d + 0.25, h = rear_magnet_h + 0.02);
 }
 
-module p4_mount_standoff(x, y) {
-    translate([x, y, backplate_t + insert_t]) {
-        difference() {
-            cylinder(d = 7.0, h = 6.0);
-            translate([0, 0, -0.01]) cylinder(d = 3.2, h = 6.02);
-        }
-    }
+module p4_mount_slot(x, y) {
+    // 5 x 3.2 mm tolerance slot for M2.5 hardware. It tolerates small
+    // differences between the reference drawing and the actual board holes.
+    translate([x - 2.5, y - 1.6, -0.01]) cube([5.0, 3.2, backplate_t + 0.02]);
 }
 
 module rear_backplate() {
@@ -214,7 +214,7 @@ module rear_backplate() {
         : frame_outer_w / 2 - usb_cable_cutout_d / 2 - usb_edge_clearance;
     usb_bottom_cutout_y = -frame_outer_h / 2 + usb_cable_cutout_d / 2 + usb_bottom_edge_clearance;
     difference() {
-        // Full 5x7 plate, aligned with the shadow-box exterior.
+    // Full 5x7 matte-black PLA plate, aligned with the shadow-box exterior.
         translate([-frame_outer_w / 2, -frame_outer_h / 2, 0])
             cube([frame_outer_w, frame_outer_h, backplate_t]);
 
@@ -230,32 +230,52 @@ module rear_backplate() {
         // Bottom-center access for tabletop placement and downward cable routing.
         translate([0, usb_bottom_cutout_y, backplate_t / 2])
             cylinder(d = usb_cable_cutout_d, h = backplate_t + 0.2, center = true);
+
+        // P4 mounting hardware: use M2.5 screws and washers from the rear.
+        for (x = [-78.0, 78.0])
+            for (y = [-44.0, 44.0])
+                p4_mount_slot(x, y);
     }
 
-    // Raised 4x6 insert: the P4/display carrier mounts above this boss.
-    translate([-panel_w / 2, -panel_h / 2, backplate_t])
-        rounded_box([panel_w, panel_h, insert_t], 3);
-
-    // Four PCB mounting points. Coordinates are based on the photo's corner-hole
-    // callouts and remain adjustable until the actual board is measured.
-    for (x = [-pcb_w / 2 + 3.75, pcb_w / 2 - 3.75])
-        for (y = [-pcb_h / 2 + 3.75, pcb_h / 2 - 3.75])
-            p4_mount_standoff(x, y);
+    // Wide rear mounting land: accommodates the 164 mm P4 PCB with 1 mm per-side relief.
+    translate([-p4_mount_w / 2, -p4_mount_h / 2, backplate_t - 0.10])
+        cube([p4_mount_w, p4_mount_h, insert_t]);
 
 }
 
 module display_model() {
     color("#202124")
-        rounded_box([display_w, display_h, 4.0], 3);
+        translate([-display_w / 2, -display_h / 2, 0])
+            rounded_box([display_w, display_h, 4.0], 3);
     color("#101820")
-        translate([(display_w - active_w) / 2, (display_h - active_h) / 2, 4.0])
+        translate([-active_w / 2, -active_h / 2, 4.0])
             cube([active_w, active_h, 0.2]);
 }
 
 module pcb_model() {
     color("#1267a8")
-        translate([(display_w - pcb_w) / 2, (display_h - pcb_h) / 2, 0])
+        translate([-pcb_w / 2, -pcb_h / 2, -1.6])
             cube([pcb_w, pcb_h, 1.6]);
+}
+
+module p4_reference_model() {
+    // Simplified fit-check model based on the supplied Waveshare outline.
+    // It captures the display shell, active area, and the PCB envelope.
+    union() {
+        display_model();
+        pcb_model();
+    }
+}
+
+module p4_aspect_mask() {
+    // A pair of 0.6 mm matte-black PLA rails on the active LCD. They reduce
+    // the visible 16:9 artwork to the 5.5:3.5 (1.571:1) scene aspect without
+    // altering the actual P4 screen or its naturally thin/wider bezels.
+    mask_w = active_h * glass_visible_w / glass_visible_h; // 97.83 mm
+    side_w = (active_w - mask_w) / 2;
+    for (side = [-1, 1])
+        translate([side * (mask_w / 2 + side_w / 2), 0, 4.2 + 0.3])
+            cube([side_w, active_h, 0.6], center = true);
 }
 
 module carrier() {
@@ -307,3 +327,5 @@ if (part == "backplate") rear_backplate();
 if (part == "carrier") carrier();
 if (part == "display") display_model();
 if (part == "pcb") pcb_model();
+if (part == "p4") p4_reference_model();
+if (part == "p4_mask") p4_aspect_mask();

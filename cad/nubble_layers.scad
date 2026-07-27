@@ -1,18 +1,14 @@
-// Nubble Lighthouse: opaque layered scene in a hidden magnetic 4x6 frame.
+// Nubble Lighthouse: opaque scene in a display-contact 4x6 frame.
 // Units: millimetres. Export `part` one component at a time.
 
 $fn = 48;
-part = "assembly"; // frame, island, breaker, foreground, assembly
+part = "assembly"; // contact_frame, island, breaker, foreground, assembly
 
-frame_w = 152.4;
-frame_h = 101.6;
-visible_w = 114.3; // 4.5 in glass / wood-mat opening
-visible_h = 88.9;  // 3.5 in glass / wood-mat opening
-frame_t = 0.8;
-magnet_d = 3.2;
-magnet_t = 1.0;
-pod_w = 8.0;
-pod_t = 2.0;
+frame_w = 152.4;  // 6 in hidden magnetic insert
+frame_h = 101.6;  // 4 in hidden magnetic insert
+visible_w = 139.7; // 5.5 in landscape door window
+visible_h = 88.9;  // 3.5 in landscape door window
+frame_t = 0.8; // matte-black PLA; directly against the P4 face
 
 module ring_2d() {
     difference() {
@@ -21,20 +17,10 @@ module ring_2d() {
     }
 }
 
-module magnetic_frame() {
-    difference() {
-        union() {
-            linear_extrude(height = frame_t) ring_2d();
-            for (x = [-frame_w / 2 + 4, frame_w / 2 - 4])
-                for (y = [-frame_h / 2 + 4, frame_h / 2 - 4])
-                    translate([x - pod_w / 2, y - pod_w / 2, 0])
-                        cube([pod_w, pod_w, pod_t]);
-        }
-        for (x = [-frame_w / 2 + 4, frame_w / 2 - 4])
-            for (y = [-frame_h / 2 + 4, frame_h / 2 - 4])
-                translate([x, y, pod_t - magnet_t + 0.01])
-                    cylinder(d = magnet_d, h = magnet_t + 0.02);
-    }
+module contact_frame() {
+    // No front magnets or pods. The closed door and wood sight-mat retain
+    // this thin ring against the display and hide it in the glass margin.
+    linear_extrude(height = frame_t) ring_2d();
 }
 
 // AI-separated assets are intentionally independent opaque pieces. The small clear
@@ -42,8 +28,8 @@ module magnetic_frame() {
 module island_layer() {
     // Registered to the source photo: the island shoreline falls just below
     // the LCD horizon rather than floating in the upper sky.
-    translate([-48.5, -14, frame_t])
-        resize([88, 24, 0])
+    translate([-53, -14, frame_t])
+        resize([106, 24, 0])
             linear_extrude(height = 0.8)
                 import("../assets/nubble-island-mask.svg");
 }
@@ -51,27 +37,27 @@ module island_layer() {
 module breaker_layer() {
     // The isolated rock sits under the central breaking wave, not as a second
     // large island. Its source footprint is deliberately small.
-    translate([-10, -25, frame_t + 1.2])
-        resize([20, 5, 0])
+    translate([-12, -25, frame_t + 1.2])
+        resize([24, 5, 0])
             linear_extrude(height = 0.8)
                 import("../assets/nubble-breaker-mask.svg");
 }
 
 module foreground_layer() {
-    translate([-55, -48, frame_t + 2.4])
-        resize([110, 27, 0])
+    translate([-66.5, -48, frame_t + 2.4])
+        resize([133, 27, 0])
             linear_extrude(height = 1.2)
                 import("../assets/nubble-foreground-mask.svg");
 }
 
 module assembly() {
-    color("#1b1b1b") magnetic_frame();
+    color("#1b1b1b") contact_frame();
     color("#101010") island_layer();
     color("#161616") breaker_layer();
     color("#070707") foreground_layer();
 }
 
-if (part == "frame") magnetic_frame();
+if (part == "contact_frame") contact_frame();
 if (part == "island") island_layer();
 if (part == "breaker") breaker_layer();
 if (part == "foreground") foreground_layer();

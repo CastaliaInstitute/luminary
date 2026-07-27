@@ -18,6 +18,10 @@ glass_t = 2.0;
 sight_mat_t = 3.2;
 sight_window_w = 133.35; // 5.25 in visible aperture
 sight_window_h = 82.55;  // 3.25 in visible aperture
+contact_frame_w = 152.4; // 6 in, black display-contact frame
+contact_frame_h = 101.6; // 4 in
+contact_rebate_clearance = 0.30;
+contact_rebate_t = 1.0;
 
 module door() {
     // Boolean ring guarantees one watertight reference solid while preserving
@@ -25,6 +29,14 @@ module door() {
     difference() {
         translate([-door_w/2, -door_h/2, 0]) cube([door_w, door_h, door_d]);
         translate([-window_w/2, -window_h/2, -0.01]) cube([window_w, window_h, door_d + 0.02]);
+        // Rear rabbet captures the 0.8 mm black contact frame flush with the
+        // door inset. It is a mechanical seat, not a magnet feature.
+        translate([-(contact_frame_w + contact_rebate_clearance)/2,
+                   -(contact_frame_h + contact_rebate_clearance)/2,
+                   door_d - contact_rebate_t])
+            cube([contact_frame_w + contact_rebate_clearance,
+                  contact_frame_h + contact_rebate_clearance,
+                  contact_rebate_t + 0.01]);
     }
 }
 
@@ -44,6 +56,12 @@ module sight_mat() {
     }
 }
 
+module contact_rebate_gauge() {
+    // Inspection-only volume for the 4 x 6 in contact-frame seat.
+    translate([-contact_frame_w/2, -contact_frame_h/2, door_d - contact_rebate_t])
+        cube([contact_frame_w, contact_frame_h, contact_rebate_t]);
+}
+
 module hinge(x) {
     // Two-leaf butt hinge: one leaf on the door and one on the case rail.
     translate([x - 9, -door_h/2 - 1, 3]) cube([18, 12, 1.2]);
@@ -54,5 +72,6 @@ module hinge(x) {
 if (part == "door") door();
 if (part == "sight_mat") sight_mat();
 if (part == "glass") glass();
+if (part == "contact_rebate_gauge") contact_rebate_gauge();
 if (part == "hinges") { hinge(-52); hinge(52); }
 if (part == "assembly") { door(); sight_mat(); glass(); hinge(-52); hinge(52); }

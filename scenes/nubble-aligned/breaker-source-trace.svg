@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="600" viewBox="0 0 1024 600">
+  <!--
+    Nubble middle shelf traced in SOURCE pixel coordinates.  This is the dark
+    rock immediately left of the breaking wave, not the white wave/foam.  It
+    occupies the middle layer behind the separate foreground rocks.
+  -->
+  <rect width="1024" height="600" fill="white"/>
+  <path fill="black" d="
+    M 0,354
+    C 25,350 50,351 74,353
+    C 99,352 123,357 148,361
+    C 173,363 198,359 221,362
+    C 244,367 268,365 291,366
+    C 314,364 337,370 359,374
+    C 380,373 399,378 417,385
+    C 432,387 444,392 454,399
+    C 440,401 425,400 411,403
+    C 390,405 369,402 348,406
+    C 325,409 304,405 282,407
+    C 259,411 238,407 217,412
+    C 194,416 172,413 150,417
+    C 127,420 105,416 84,414
+    C 63,413 42,409 22,408
+    C 13,407 5,406 0,405 Z"/>
+</svg>

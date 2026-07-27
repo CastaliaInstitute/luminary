@@ -31,6 +31,7 @@ water on the display between the foreground, breaker, and island.
 - `renders/stl/nubble-foreground-layer.stl` — near boulders
 
 The first is installed behind the wood mat; the three opaque masks stack toward the glass.
-The LCD remains the fourth visual layer (sky and water), 9 mm behind the printed scene to
-preserve image registration from an angled view.
+The LCD remains the fourth visual layer (sky and water), mounted at the rear of the fixed
+2 in box. Artwork is registered for the straight-on viewing position; the angled view is
+allowed to reveal the intended shadow-box parallax.
 `renders/nubble-concept.png` is the Blender render made by importing those exact STL files.

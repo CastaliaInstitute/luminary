@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="600" viewBox="0 0 1024 600">
+  <!--
+    Source-coordinate exterior trace of the midground peninsula.  This is the
+    opaque print boundary; dark-pixel processing is used only for its texture.
+    The trace intentionally enters at the left edge and terminates before the
+    breaking wave, matching the photographed peninsula rather than treating
+    the breaker tip as a floating rock.
+  -->
+  <rect width="1024" height="600" fill="white"/>
+  <path fill="black" d="
+    M 0,346
+    C 28,342 60,342 90,347
+    C 126,350 159,353 194,357
+    C 225,359 255,365 284,365
+    C 318,365 347,371 373,382
+    C 402,389 431,403 455,419
+    C 459,423 459,429 454,433
+    C 419,430 383,429 349,424
+    C 316,424 282,423 250,425
+    C 213,425 178,423 142,421
+    C 105,417 68,414 32,407
+    L 0,403 Z"/>
+</svg>

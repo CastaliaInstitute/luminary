@@ -92,6 +92,8 @@ Current fit-check exports:
 - `renders/stl/luminary-silhouette-carrier.stl` — clear hidden ring, magnet pods, and support traces
 - `renders/stl/luminary-silhouette.stl` — black source-derived island and foreground rocks
 - `renders/stl/luminary-structures.stl` — white lighthouse and building insert
+- `renders/stl/p4-reference-model.stl` — simplified, dimensioned P4 display/PCB fit-check model
+- `renders/stl/p4-5_5x3_5-aspect-mask.stl` — two thin black LCD-mask rails, reducing the visible scene to 97.83 × 62.28 mm
 
 All five were exported from `cad/lightbox.scad` with OpenSCAD and checked as non-empty
 ASCII STL meshes. The silhouette carrier is deliberately a ring-and-trace design; it is
@@ -100,9 +102,9 @@ not a full clear 4 × 6 panel.
 
 ## Rear plate architecture
 
-The rear of the object is now a printed 5 × 7 plate. A shallow 4 × 6 registration land keeps
-the display close to the frame back while providing a mounting datum for the P4/display
-assembly. Four rear-facing pockets accept magnets that
+The rear of the object is a **matte-black PLA printed 5 × 7 plate**, not a separate wood
+backing. A shallow 4 × 6 registration land provides the mounting datum for the P4/display
+assembly at the rear of the 2 in box. Four rear-facing pockets accept magnets that
 mate with steel plates bonded to the inside back of the shadow-box frame. The default USB-C
 access is provided by two small circular pass-throughs in the printed back: one on the side
 for wall mounting and one centered along the bottom for tabletop placement. The connector

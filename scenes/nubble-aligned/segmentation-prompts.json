@@ -1,0 +1,11 @@
+{
+  "source": "source.png",
+  "layers": {
+    "peninsula": {
+      "positive": [[42, 368], [115, 363], [193, 370], [265, 386], [338, 405], [420, 414], [24, 430], [72, 470], [150, 475]],
+      "negative": [[56, 321], [176, 326], [316, 347], [468, 365], [498, 448], [250, 510]],
+      "output": "breaker-source-segmentation.png",
+      "review": "breaker-source-sam2-review.png"
+    }
+  }
+}

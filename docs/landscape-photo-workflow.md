@@ -1,129 +1,120 @@
-# Landscape photo → Luminary workflow
+# Landscape photo to Luminary bas-relief workflow
 
-Use this workflow for every new scene. Its rule is simple: the photograph is the
-composition authority. AI may remove, reconstruct, and clarify material, but must not
-redesign the landform.
+The photograph is the composition authority. AI may segment or fill an image,
+but it must not redesign the landform, move the horizon, or change the scale
+relationship between a distant island, breaker, and foreground rocks.
 
-## 1. Prepare one source photograph
+Luminary's production configuration is a 7 x 5 in landscape shadow box with a
+Waveshare ESP32-P4-WIFI6-Touch-LCD-7B at the rear. The physical scene field is
+5.5 x 3.5 in (139.7 x 88.9 mm) behind a 5.25 x 3.25 in wood sight aperture.
+It uses a 1024 x 600 working canvas. The narrow sight mat deliberately hides
+the LCD edge and the cropped field margin.
 
-Start with the highest-resolution image available. Save it as:
+## 1. Normalize the source
 
-```text
-assets/source/<scene>-original.jpg
+Create `scenes/<scene>/source.png` from the best available photograph:
+
+- landscape orientation;
+- exactly 1024 x 600 pixels;
+- preserve the intended island, breaker, foreground contours, and horizon;
+- do not independently crop later layer inputs.
+
+The source coordinates are geometry. Every generated mask must retain this
+same 1024 x 600 canvas and pixel registration.
+
+## 2. Create the land-free LCD background
+
+Use image generation with the source photograph as a reference:
+
+> Edit this supplied landscape photograph into a photorealistic background.
+> Preserve its exact horizon height, clouds, atmosphere, water direction, and
+> lighting. Remove all land, buildings, shoreline, rocks, foam, and people;
+> naturally fill the removed areas with continuous water. Do not move or crop
+> the composition, add text, or change the photographic style.
+
+Save the result at `scenes/<scene>/background.png`, exactly 1024 x 600. This
+is the only sky and water image displayed by the P4.
+
+## 3. Segment opaque printed layers
+
+Make three source-registered, black-on-white PNG masks, each exactly 1024 x
+600, and save them next to the source:
+
+| Layer | File | Physical placement |
+| --- | --- | --- |
+| Distant island/shore | `island.png` | LCD contact plane |
+| Midground peninsula including the breaking-wave rock | `breaker-source-segmentation.png` | 2.5 mm forward |
+| Nearest foreground rocks | `foreground.png` | 5.0 mm forward |
+
+The source-derived midground peninsula is intentionally separate from the
+distant island and foreground. It must remain connected to its source-side
+field edge; do not make its breaker tip into a floating island. Exclude water
+and foam. Rocks are opaque; transparent rock areas make the display show
+through and invalidate the physical scene.
+
+Use AI only as a segmentation aid. Validate each mask by compositing it over
+the original source, at identical pixel dimensions. Reject a mask if it moves
+shoreline edges, flattens the bottom profile, makes the foreground too large,
+or invents a landform.
+
+White building/lighthouse inserts are optional and must remain out of the print
+set until a separately segmented, source-aligned architecture mask is reviewed.
+Do not improvise their scale from a generative image.
+
+## 4. Compile and inspect registration
+
+Run:
+
+```sh
+scripts/compile-bas-relief.sh <scene>
 ```
 
-Choose a landscape crop that has a clear horizon and a foreground/middle-ground separation.
-Do not crop buildings, lighthouse tops, rock edges, or the highest wave until the final
-display aspect ratio is known.
+The compiler centre-crops the same 943 x 600 source region from the LCD
+background and every mask, then normalizes it back to 1024 x 600 for the
+5.5 x 3.5 in physical field. This shared crop is essential: independent
+resize/crop steps create visible parallax errors.
 
-Record these three visual planes before processing:
+Inspect `scenes/<scene>/compiled/reference-alignment.png` before exporting:
 
-| Plane | Becomes |
-| --- | --- |
-| Sky and open water | LCD background |
-| Island / shore / architecture | Black relief plus optional white building insert |
-| Nearest rocks | Separate raised foreground silhouette |
+- island appears red;
+- breaker appears gold;
+- foreground appears cyan.
 
-## 2. Make the LCD background with AI fill
+All contours must track the original photograph. This review is against the
+source photo, not the generated LCD background.
 
-Use image generation with the source photo as a reference. Generate a **land-free** image at
-the LCD aspect ratio (the P4 active area is 110.32 × 62.28 mm, effectively 16:9). Preserve
-the photograph's horizon height, sky color, clouds, water direction, and lighting.
+## 5. Build the printable bas-relief
 
-Prompt template:
+For Nubble, export the three opaque bases from
+`cad/bas_relief_scene.scad`, then create the source-tonal companion meshes:
 
-> Edit this supplied landscape photograph into a photorealistic 16:9 LCD background.
-> Preserve the exact sky, horizon height, atmosphere, and water color/direction. Completely
-> remove all land, buildings, shoreline, rocks, surf foreground, and people; naturally fill
-> those areas with uninterrupted water. Leave the lower third readable behind a physical
-> foreground silhouette. No text, border, or illustration styling.
-
-Save the resulting file as:
-
-```text
-assets/display-<scene>-1280x720.png
+```sh
+python3 scripts/build-rock-texture-mesh.py \
+  scenes/<scene>/compiled/island-texture.png \
+  renders/stl/<scene>-basrelief-island-texture.stl --base-z 1.6
 ```
 
-Resize/crop to exactly 1280 × 720 without moving the horizon unless the CAD review demands
-it. The display image should be the only source of sky and water.
+Repeat for breaker (`--base-z 3.2`) and foreground (`--base-z 5.0`). The mesh
+samples 0.2 x 0.2 mm XY detail and converts source tones into a maximum 1.35
+mm printable height field. Load each texture STL with its matching base STL as
+one object in the slicer; print at 0.12 mm layers.
 
-## 3. Make AI tracing references for the island and foreground
+Do not use the 2 in box depth as a 20-35 mm parallax gap. The scene is a
+shallow bas-relief: the contact island is at the display, breaker 2.5 mm
+forward, and foreground 5 mm forward. That depth is enough to reveal form at
+a slight angle while retaining source/background registration.
 
-Generate a second reference from the original photo for the island and architecture only.
-This is **not** the final artwork; it is an aid for making a faithful vector silhouette.
+## 6. Render and verify
 
-Prompt template:
+Render only imported production STLs:
 
-> Create a clean, source-faithful architectural tracing reference from this exact landscape
-> photograph. Do not redesign or beautify it. Preserve the photographed landform, relative
-> building sizes, horizon placement, and foreground rock contours. Remove sky, water, waves,
-> and foam. Make the distant island and land solid black; make buildings pure white; keep lighthouse lantern
-> glazing open/transparent. Use a pure white background, crisp untextured forms, no gradients,
-> labels, or border.
-
-Save it as:
-
-```text
-assets/<scene>-silhouette-reference.png
+```sh
+LUMINARY_SCENE=nubble /Applications/Blender.app/Contents/MacOS/Blender \
+  --background --python blender/luminary_scene.py
+scripts/verify-production.sh
 ```
 
-Reject a reference if it invents buildings, turns a low island into a mountain, merges open
-water into land, or changes the relative lighthouse/house scale.
-
-Generate a third reference for foreground rocks only. Exclude the distant island and preserve
-the original water gaps between boulders. If the source has a wave striking a middle rock,
-make that rock a separate fourth shallow layer. This prevents foreground rocks or the
-breaker-rock target from being lost when AI creates the island pass.
-
-## 4. Trace printable silhouettes, not a bitmap
-
-Build SVGs from the reference using simple closed paths:
-
-- `living-landscape-photo-trace.svg`: black island reference
-- `living-landscape-foreground.svg`: separate black foreground-rock reference
-- `living-landscape-structures.svg`: separate white structures
-
-Keep the three rules below.
-
-1. The black landform must have a visibly irregular top and bottom contour; avoid a long,
-   uniform horizontal band.
-2. The lighthouse lantern center must be an actual hole in the white STL, not a dark printed
-   rectangle.
-3. Isolated foreground rocks need narrow clear support traces to the rabbet ring. Do **not**
-   solve this with a full clear 4 × 6 sheet.
-
-At a 0.2 mm nozzle, use a 0.8 mm black base (four layers) and a 1.2 mm white insert (six
-layers) unless a scene specifically needs a thicker foreground layer.
-
-## 5. Fit the background to the physical viewing angle
-
-Render the actual exported STLs, not proxy geometry. Set the LCD 20 mm behind the silhouette
-as the normal Luminary starting point; this retains depth while reducing horizon parallax at
-a slight viewing angle.
-
-Check these before approval:
-
-- Horizon remains visually continuous behind the island.
-- Water is visible through every intended opening.
-- The display does not appear to slide sideways relative to the silhouette at the chosen
-  product-render angle.
-- The white lighthouse/buildings read as distinct physical inserts.
-
-If the background still shifts, adjust the display image's crop/horizon first; only then move
-the display plane in 2–3 mm increments.
-
-## 6. Export and verify the printable set
-
-Export from `cad/lightbox.scad`:
-
-```text
-luminary-backplate.stl
-luminary-display-carrier.stl
-luminary-silhouette-carrier.stl
-luminary-silhouette.stl
-luminary-structures.stl
-```
-
-Every export must be non-empty and closed before it is used in Blender. The final render must
-import those files directly, with the generated LCD background applied at the active display
-area.
+The verifier rebuilds the source-alignment artifact and checks every required
+STL for nonmanifold and boundary edges. Reject the scene if the product render
+shows a background shift at the selected three-quarter camera angle, or if the
+reference-alignment overlay disagrees with the source photograph.

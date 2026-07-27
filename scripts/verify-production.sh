@@ -15,9 +15,14 @@ required=(
   renders/stl/luminary-7in-p4-backplate.stl
   renders/stl/luminary-7in-p4-fit-check.stl
   renders/stl/luminary-front-door-reference.stl
+  renders/stl/nubble-display-contact-frame.stl
+  renders/stl/nubble-clear-supports.stl
   renders/stl/nubble-basrelief-island.stl
+  renders/stl/nubble-basrelief-island-texture.stl
   renders/stl/nubble-basrelief-breaker.stl
+  renders/stl/nubble-basrelief-breaker-texture.stl
   renders/stl/nubble-basrelief-foreground.stl
+  renders/stl/nubble-basrelief-foreground-texture.stl
 )
 
 for file in "${required[@]}"; do
@@ -32,6 +37,14 @@ for image in source background island breaker foreground; do
   }
 done
 
+# The middle breaker is a source-coordinate semantic segmentation. It replaces
+# the older broad shelf trace, which incorrectly included water/foam.
+breaker_dimensions="$(identify -format '%w %h' scenes/nubble-aligned/breaker-source-segmentation.png)"
+[[ "$breaker_dimensions" == '1024 600' ]] || {
+  echo "invalid Nubble breaker segmentation canvas: $breaker_dimensions" >&2
+  exit 1
+}
+
 # Recompile from the canonical source masks, then require the reference-photo
 # overlay used for visual validation. This deliberately avoids validating
 # against the generated LCD background.
@@ -45,6 +58,6 @@ reference_dimensions="$(identify -format '%w %h' scenes/nubble-aligned/compiled/
 blender_bin="${BLENDER_BIN:-/Applications/Blender.app/Contents/MacOS/Blender}"
 [[ -x "$blender_bin" ]] || { echo "Blender not found: $blender_bin" >&2; exit 1; }
 
-"$blender_bin" --background --factory-startup --python-expr 'exec("import bpy,bmesh,glob,os,sys\nroot=\"renders/stl\"\nnames={\"luminary-7in-p4-backplate.stl\",\"luminary-7in-p4-fit-check.stl\",\"luminary-front-door-reference.stl\",\"nubble-basrelief-island.stl\",\"nubble-basrelief-breaker.stl\",\"nubble-basrelief-foreground.stl\"}\nfailed=False\nfor name in sorted(names):\n    bpy.ops.object.select_all(action=\"SELECT\")\n    bpy.ops.object.delete(use_global=False)\n    bpy.ops.wm.stl_import(filepath=os.path.join(root,name))\n    bm=bmesh.new(); bm.from_mesh(bpy.context.selected_objects[0].data)\n    nonmanifold=sum(not e.is_manifold for e in bm.edges); boundary=sum(e.is_boundary for e in bm.edges)\n    print(f\"STL_VERIFY {name} nonmanifold={nonmanifold} boundary={boundary}\")\n    failed=failed or nonmanifold != 0 or boundary != 0\n    bm.free()\nsys.exit(1 if failed else 0)")'
+"$blender_bin" --background --factory-startup --python-expr 'exec("import bpy,bmesh,glob,os,sys\nroot=\"renders/stl\"\nnames={\"luminary-7in-p4-backplate.stl\",\"luminary-7in-p4-fit-check.stl\",\"luminary-front-door-reference.stl\",\"nubble-display-contact-frame.stl\",\"nubble-clear-supports.stl\",\"nubble-basrelief-island.stl\",\"nubble-basrelief-island-texture.stl\",\"nubble-basrelief-breaker.stl\",\"nubble-basrelief-breaker-texture.stl\",\"nubble-basrelief-foreground.stl\",\"nubble-basrelief-foreground-texture.stl\"}\nfailed=False\nfor name in sorted(names):\n    bpy.ops.object.select_all(action=\"SELECT\")\n    bpy.ops.object.delete(use_global=False)\n    bpy.ops.wm.stl_import(filepath=os.path.join(root,name))\n    bm=bmesh.new(); bm.from_mesh(bpy.context.selected_objects[0].data)\n    nonmanifold=sum(not e.is_manifold for e in bm.edges); boundary=sum(e.is_boundary for e in bm.edges)\n    print(f\"STL_VERIFY {name} nonmanifold={nonmanifold} boundary={boundary}\")\n    failed=failed or nonmanifold != 0 or boundary != 0\n    bm.free()\nsys.exit(1 if failed else 0)")'
 
 echo 'Luminary production-candidate verification passed.'
