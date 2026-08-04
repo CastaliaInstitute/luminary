@@ -1,0 +1,28 @@
+{
+  "location": {
+    "name": "York, Maine",
+    "latitude": 43.1637,
+    "longitude": -70.6480,
+    "timezone": "America/New_York"
+  },
+  "nws": {
+    "point_url": "https://api.weather.gov/points/43.1637,-70.6480",
+    "hourly_forecast_url": "https://api.weather.gov/gridpoints/GYX/64,33/forecast/hourly",
+    "preferred_observation_station": "KPSM"
+  },
+  "visual_reference": {
+    "name": "Nubble Lighthouse live camera",
+    "url": "https://www.youtube.com/live/M6LiCaJKfMA",
+    "use": "current sky palette, brightness, haze and cloud-coverage calibration",
+    "never_use_for": "display registration or horizon geometry"
+  },
+  "ocean": {
+    "wave_station": "44098",
+    "wave_url": "https://www.ndbc.noaa.gov/data/realtime2/44098.txt",
+    "tide_station": "8419317",
+    "tide_url_template": "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?begin_date={begin_date}&end_date={end_date}&station=8419317&product=predictions&datum=MLLW&time_zone=lst_ldt&units=metric&interval=hilo&application=luminary&format=json"
+  },
+  "refresh_minutes": 5,
+  "fallback": "time-of-day authored loop",
+  "display_registration": "../scenes/nubble-aligned/compiled/display-registration.json"
+}

@@ -1,0 +1,7 @@
+# ESP-IDF local configuration and generated build trees
+sdkconfig
+sdkconfig.old
+build*/
+
+# Component downloads are locked by dependencies.lock and restored by idf.py.
+managed_components/

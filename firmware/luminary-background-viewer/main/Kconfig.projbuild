@@ -1,0 +1,35 @@
+menu "Luminary Network"
+
+    config LUMINARY_WIFI_SSID
+        string "Wi-Fi SSID"
+        default "$(LUMINARY_BUILD_WIFI_SSID)"
+        help
+            Network used by the Luminary live-condition client. The build
+            injects this value from the local environment into gitignored
+            sdkconfig; it is never committed to the repository.
+
+    config LUMINARY_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default "$(LUMINARY_BUILD_WIFI_PASSWORD)"
+        help
+            WPA2/WPA3 password injected from the local macOS Keychain into
+            gitignored sdkconfig.
+
+    config LUMINARY_WIFI_MAXIMUM_RETRY
+        int "Maximum connection retries"
+        default 12
+        range 1 100
+
+    config LUMINARY_RUNTIME_BASE_URL
+        string "Autonomous runtime bundle URL"
+        default "https://raw.githubusercontent.com/CastaliaInstitute/luminary/runtime-live/site/runtime/v1"
+        help
+            HTTPS directory containing manifest.json and its cache-busted
+            runtime assets. The P4 pulls this bundle itself after Wi-Fi joins.
+
+    config LUMINARY_RUNTIME_POLL_SECONDS
+        int "Runtime bundle poll interval in seconds"
+        default 300
+        range 60 86400
+
+endmenu

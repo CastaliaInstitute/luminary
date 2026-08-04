@@ -1,0 +1,45 @@
+name: Publish live Luminary runtime
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: luminary-live-runtime
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install runtime builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg hdf5-tools
+          python -m pip install --disable-pip-version-check numpy pillow yt-dlp
+
+      - name: Build measured scene
+        run: python scripts/update-york-runtime.py --camera-optional
+
+      - name: Build autonomous client bundle
+        run: python scripts/publish-runtime-bundle.py
+
+      - name: Publish immutable runtime branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          runtime_index="$(mktemp)"
+          rm "$runtime_index"
+          GIT_INDEX_FILE="$runtime_index" git read-tree --empty
+          GIT_INDEX_FILE="$runtime_index" git add -f site/runtime/v1
+          runtime_tree="$(GIT_INDEX_FILE="$runtime_index" git write-tree)"
+          runtime_commit="$(printf '%s\n' 'Publish live Luminary runtime' | git commit-tree "$runtime_tree")"
+          git push --force origin "$runtime_commit:refs/heads/runtime-live"
