@@ -37,6 +37,7 @@
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "luminary_runtime_state.h"
+#include "hipparcos_stars.h"
 
 #define LUMINARY_WIDTH                  1024U
 #define LUMINARY_HEIGHT                  600U
@@ -111,6 +112,16 @@ typedef struct {
 static runtime_state_t runtime_state;
 static SemaphoreHandle_t runtime_lock;
 static const uint8_t *current_framebuffer;
+
+typedef struct {
+    int16_t x, y;
+    uint8_t intensity;
+    uint8_t radius;
+} visible_star_t;
+
+#define MAX_VISIBLE_STARS 512U
+static visible_star_t visible_stars[MAX_VISIBLE_STARS];
+static unsigned visible_star_count;
 
 #define CLOUD_ATLAS_BYTES (LUMINARY_CLOUD_TEXTURE_WIDTH * LUMINARY_CLOUD_TEXTURE_HEIGHT * 2U)
 #define OCEAN_PHASE_BYTES (LUMINARY_WIDTH * LUMINARY_HEIGHT)
@@ -196,6 +207,72 @@ static double wrap_degrees(double value)
     return value < 0.0 ? value + 360.0 : value;
 }
 
+static void update_visible_stars(double jd, double gmst, double sun_altitude_deg)
+{
+    visible_star_count = 0;
+    double limiting_magnitude;
+    if (sun_altitude_deg >= -6.0) return;
+    if (sun_altitude_deg < -18.0) {
+        limiting_magnitude = 6.5;
+    } else if (sun_altitude_deg < -12.0) {
+        limiting_magnitude = 4.5 + (-sun_altitude_deg - 12.0) / 6.0 * 2.0;
+    } else {
+        limiting_magnitude = 1.5 + (-sun_altitude_deg - 6.0) / 6.0 * 3.0;
+    }
+    const double years = 2000.0 + (jd - 2451545.0) / 365.25 - HIPPARCOS_EPOCH_YEAR;
+    const double centuries = (jd - 2451545.0) / 36525.0;
+    const double zeta = (2306.2181 * centuries + 0.30188 * centuries * centuries +
+                         0.017998 * centuries * centuries * centuries) / 3600.0 * M_PI / 180.0;
+    const double zed = (2306.2181 * centuries + 1.09468 * centuries * centuries +
+                        0.018203 * centuries * centuries * centuries) / 3600.0 * M_PI / 180.0;
+    const double theta = (2004.3109 * centuries - 0.42665 * centuries * centuries -
+                          0.041833 * centuries * centuries * centuries) / 3600.0 * M_PI / 180.0;
+    const double latitude = YORK_LATITUDE_DEG * M_PI / 180.0;
+    for (unsigned index = 0; index < HIPPARCOS_STAR_COUNT; ++index) {
+        const hipparcos_star_t *star = &HIPPARCOS_STARS[index];
+        const double magnitude = star->vmag_centimag / 100.0;
+        if (magnitude > limiting_magnitude) break; /* Catalogue is magnitude sorted. */
+        double dec_deg = star->dec_microdeg / 1000000.0 +
+                         star->pm_dec_mas_year * years / 3600000.0;
+        double dec = dec_deg * M_PI / 180.0;
+        const double cos_dec = cos(dec);
+        double ra_deg = star->ra_microdeg / 1000000.0;
+        if (fabs(cos_dec) > 1e-6) {
+            ra_deg += star->pm_ra_mas_year * years / (3600000.0 * cos_dec);
+        }
+        // Precess the proper-motion-corrected ICRS/J2000 direction to the
+        // equator/equinox of date before applying Greenwich sidereal time.
+        const double ra0 = ra_deg * M_PI / 180.0;
+        const double a = cos(dec) * sin(ra0 + zeta);
+        const double b = cos(theta) * cos(dec) * cos(ra0 + zeta) - sin(theta) * sin(dec);
+        const double c = sin(theta) * cos(dec) * cos(ra0 + zeta) + cos(theta) * sin(dec);
+        ra_deg = wrap_degrees((atan2(a, b) + zed) * 180.0 / M_PI);
+        dec = asin(c);
+        double hour_angle = wrap_degrees(gmst + YORK_LONGITUDE_DEG - ra_deg) + 180.0;
+        hour_angle = hour_angle * M_PI / 180.0 - M_PI;
+        const double altitude = asin(sin(latitude) * sin(dec) +
+                                     cos(latitude) * cos(dec) * cos(hour_angle));
+        if (altitude <= 0.0) continue;
+        const double azimuth = wrap_degrees(atan2(
+            sin(hour_angle), cos(hour_angle) * sin(latitude) - tan(dec) * cos(latitude)
+        ) * 180.0 / M_PI + 180.0);
+        double relative = azimuth - NUBBLE_CAMERA_BEARING_DEG;
+        while (relative > 180.0) relative -= 360.0;
+        while (relative < -180.0) relative += 360.0;
+        if (fabs(relative) >= 55.0) continue;
+        const int x = (int)lrint(512.0 + 358.53 * tan(relative * M_PI / 180.0));
+        const int y = (int)lrint(291.0 - 782.79 * tan(altitude));
+        if (x < 0 || x >= (int)LUMINARY_WIDTH || y < 0 || y >= (int)LUMINARY_RUNTIME_HORIZON) continue;
+        if (visible_star_count >= MAX_VISIBLE_STARS) break;
+        visible_star_t *visible = &visible_stars[visible_star_count++];
+        visible->x = (int16_t)x;
+        visible->y = (int16_t)y;
+        visible->intensity = (uint8_t)fmin(255.0, fmax(18.0,
+            255.0 * pow(0.72, magnitude + 1.5)));
+        visible->radius = magnitude < 0.5 ? 2U : magnitude < 2.0 ? 1U : 0U;
+    }
+}
+
 static bool update_solar_position_from_clock(time_t now)
 {
     // Reject the unset epoch. The fetched runtime state remains the fallback
@@ -229,6 +306,7 @@ static bool update_solar_position_from_clock(time_t now)
     runtime_state.sun_mode = altitude_deg >= 0.0 ? 0U :
                              altitude_deg >= -6.0 ? 1U :
                              altitude_deg >= -12.0 ? 2U : 3U;
+    update_visible_stars(jd, gmst, altitude_deg);
     return true;
 }
 
@@ -799,10 +877,6 @@ static void grade_sky_pixel(uint8_t *bgr, unsigned x, unsigned y)
         bgr[0] = (uint8_t)(bgr[0] * 22U / 100U);
         bgr[1] = (uint8_t)(bgr[1] * 12U / 100U);
         bgr[2] = (uint8_t)(bgr[2] * 7U / 100U);
-        const uint32_t hash = (x * 73856093U) ^ (y * 19349663U);
-        if ((hash & 0x1fffU) == 0U && y + 44U < LUMINARY_RUNTIME_HORIZON) {
-            bgr[0] = 235U; bgr[1] = 220U; bgr[2] = 210U;
-        }
     }
 
     // The moon is projected from measured York altitude/azimuth. It is drawn
@@ -841,6 +915,61 @@ static void grade_water_pixel(uint8_t *bgr, unsigned y)
         bgr[0] = (uint8_t)(bgr[0] * 34U / 100U);
         bgr[1] = (uint8_t)(bgr[1] * 24U / 100U);
         bgr[2] = (uint8_t)(bgr[2] * 18U / 100U);
+    }
+}
+
+static unsigned cloud_transmission_at(unsigned x, unsigned y, const int shift_x[3],
+                                      const int shift_y[3], unsigned cloud_cover_permille)
+{
+    unsigned transmission = 255U;
+    for (unsigned shell_index = 0; shell_index < 3U; ++shell_index) {
+        const cloud_shell_t *shell = &runtime_state.shells[shell_index];
+        const int atlas_x = wrap_cloud_x((int)cloud_x_lut[x] + shift_x[shell_index]);
+        const int atlas_y = mirror_cloud_y((int)cloud_y_lut[y] + shift_y[shell_index]);
+        const size_t index = ((size_t)atlas_y * LUMINARY_CLOUD_TEXTURE_WIDTH + atlas_x) * 2U;
+        unsigned alpha = shell->atlas[index + 1U] * cloud_cover_permille / 1000U;
+        const unsigned clearance = LUMINARY_RUNTIME_HORIZON - y;
+        if (clearance < 22U) alpha = alpha * clearance / 22U;
+        transmission = transmission * (255U - alpha) / 255U;
+    }
+    return transmission;
+}
+
+static void blend_star_pixel(uint8_t *destination, int x, int y, unsigned intensity)
+{
+    if (x < 0 || x >= (int)LUMINARY_WIDTH || y < 0 || y >= (int)LUMINARY_RUNTIME_HORIZON) return;
+    uint8_t *bgr = destination + ((size_t)y * LUMINARY_WIDTH + (unsigned)x) * LUMINARY_BPP;
+    const unsigned target[3] = {255U, 244U, 235U};
+    for (unsigned channel = 0; channel < 3U; ++channel) {
+        bgr[channel] = (uint8_t)((bgr[channel] * (255U - intensity) +
+                                  target[channel] * intensity) / 255U);
+    }
+}
+
+static void overlay_real_stars(uint8_t *destination, const int shift_x[3], const int shift_y[3],
+                               unsigned cloud_cover_permille)
+{
+    for (unsigned index = 0; index < visible_star_count; ++index) {
+        const visible_star_t *star = &visible_stars[index];
+        const unsigned transmission = cloud_transmission_at(
+            (unsigned)star->x, (unsigned)star->y, shift_x, shift_y, cloud_cover_permille);
+        const unsigned center = star->intensity * transmission / 255U;
+        if (center < 5U) continue;
+        blend_star_pixel(destination, star->x, star->y, center);
+        if (star->radius >= 1U) {
+            const unsigned halo = center / 3U;
+            blend_star_pixel(destination, star->x - 1, star->y, halo);
+            blend_star_pixel(destination, star->x + 1, star->y, halo);
+            blend_star_pixel(destination, star->x, star->y - 1, halo);
+            blend_star_pixel(destination, star->x, star->y + 1, halo);
+        }
+        if (star->radius >= 2U) {
+            const unsigned halo = center / 6U;
+            blend_star_pixel(destination, star->x - 2, star->y, halo);
+            blend_star_pixel(destination, star->x + 2, star->y, halo);
+            blend_star_pixel(destination, star->x, star->y - 2, halo);
+            blend_star_pixel(destination, star->x, star->y + 2, halo);
+        }
     }
 }
 
@@ -910,6 +1039,7 @@ static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint
             grade_water_pixel(destination + target, y);
         }
     }
+    overlay_real_stars(destination, cloud_shift_x, cloud_shift_y, cloud_cover_permille);
 }
 
 void app_main(void)
@@ -1016,9 +1146,10 @@ void app_main(void)
         xSemaphoreTake(runtime_lock, portMAX_DELAY);
         if (wall_clock - last_solar_update >= 30 && update_solar_position_from_clock(wall_clock)) {
             last_solar_update = wall_clock;
-            ESP_LOGI(TAG, "Local solar position: alt=%.1f deg rel-az=%.1f deg",
+            ESP_LOGI(TAG, "Local solar position: alt=%.1f deg rel-az=%.1f deg; %u Hipparcos stars in view",
                      runtime_state.sun_altitude_deci_deg / 10.0,
-                     runtime_state.sun_relative_azimuth_deci_deg / 10.0);
+                     runtime_state.sun_relative_azimuth_deci_deg / 10.0,
+                     visible_star_count);
         }
         const bool cloudy = runtime_state.cloud_cover_permille > 0U;
         render_runtime_frame(framebuffer[target], decoded, elapsed_ms);
