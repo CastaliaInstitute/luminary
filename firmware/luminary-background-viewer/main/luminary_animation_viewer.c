@@ -792,13 +792,13 @@ static void grade_sky_pixel(uint8_t *bgr, unsigned x, unsigned y)
         bgr[1] = (uint8_t)(bgr[1] * light / 255U);
         bgr[2] = (uint8_t)(bgr[2] * light / 255U);
     } else if (runtime_state.sun_mode == 2U) {
-        bgr[0] = (uint8_t)(bgr[0] * 56U / 100U);
-        bgr[1] = (uint8_t)(bgr[1] * 43U / 100U);
-        bgr[2] = (uint8_t)(bgr[2] * 34U / 100U);
+        bgr[0] = (uint8_t)(bgr[0] * 34U / 100U);
+        bgr[1] = (uint8_t)(bgr[1] * 24U / 100U);
+        bgr[2] = (uint8_t)(bgr[2] * 15U / 100U);
     } else if (runtime_state.sun_mode == 3U) {
-        bgr[0] = (uint8_t)(bgr[0] * 42U / 100U);
-        bgr[1] = (uint8_t)(bgr[1] * 28U / 100U);
-        bgr[2] = (uint8_t)(bgr[2] * 20U / 100U);
+        bgr[0] = (uint8_t)(bgr[0] * 22U / 100U);
+        bgr[1] = (uint8_t)(bgr[1] * 12U / 100U);
+        bgr[2] = (uint8_t)(bgr[2] * 7U / 100U);
         const uint32_t hash = (x * 73856093U) ^ (y * 19349663U);
         if ((hash & 0x1fffU) == 0U && y + 44U < LUMINARY_RUNTIME_HORIZON) {
             bgr[0] = 235U; bgr[1] = 220U; bgr[2] = 210U;
