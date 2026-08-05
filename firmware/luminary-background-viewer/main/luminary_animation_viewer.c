@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 
 #include "driver/jpeg_decode.h"
 #include "cJSON.h"
@@ -28,6 +29,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_netif.h"
+#include "esp_netif_sntp.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -94,6 +96,8 @@ typedef struct {
     uint16_t cloud_cover_permille;
     uint8_t sky_r, sky_g, sky_b;
     uint8_t sun_mode; /* 0 day, 1 civil, 2 nautical, 3 night */
+    int16_t sun_altitude_deci_deg;
+    int16_t sun_relative_azimuth_deci_deg;
     bool moon_visible;
     int16_t moon_x, moon_y;
     uint16_t moon_illumination_permille;
@@ -113,6 +117,9 @@ static SemaphoreHandle_t runtime_lock;
 #define RUNTIME_STATE_MAX_BYTES    8192U
 #define RUNTIME_URL_MAX_BYTES       512U
 #define RUNTIME_PATH_MAX_BYTES      160U
+#define YORK_LATITUDE_DEG        43.1637
+#define YORK_LONGITUDE_DEG      -70.6480
+#define NUBBLE_CAMERA_BEARING_DEG    90.0
 
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAILED_BIT    BIT1
@@ -177,7 +184,51 @@ static void start_wifi(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &station));
     ESP_ERROR_CHECK(esp_wifi_start());
+    const esp_sntp_config_t sntp_config = ESP_NETIF_SNTP_DEFAULT_CONFIG("time.cloudflare.com");
+    ESP_ERROR_CHECK(esp_netif_sntp_init(&sntp_config));
     ESP_LOGI(TAG, "Connecting to Wi-Fi SSID '%s'", CONFIG_LUMINARY_WIFI_SSID);
+}
+
+static double wrap_degrees(double value)
+{
+    value = fmod(value, 360.0);
+    return value < 0.0 ? value + 360.0 : value;
+}
+
+static bool update_solar_position_from_clock(time_t now)
+{
+    // Reject the unset epoch. The fetched runtime state remains the fallback
+    // until SNTP supplies UTC; thereafter the P4 owns solar position locally.
+    if (now < 1700000000) return false;
+    const double jd = (double)now / 86400.0 + 2440587.5;
+    const double d = jd - 2451545.0;
+    const double mean_longitude = wrap_degrees(280.460 + 0.9856474 * d);
+    const double anomaly = wrap_degrees(357.528 + 0.9856003 * d) * M_PI / 180.0;
+    const double ecliptic_longitude = wrap_degrees(
+        mean_longitude + 1.915 * sin(anomaly) + 0.020 * sin(2.0 * anomaly)) * M_PI / 180.0;
+    const double obliquity = (23.439 - 0.0000004 * d) * M_PI / 180.0;
+    const double right_ascension = atan2(cos(obliquity) * sin(ecliptic_longitude),
+                                         cos(ecliptic_longitude)) * 180.0 / M_PI;
+    const double declination = asin(sin(obliquity) * sin(ecliptic_longitude));
+    const double gmst = wrap_degrees(280.46061837 + 360.98564736629 * d);
+    double hour_angle = wrap_degrees(gmst + YORK_LONGITUDE_DEG - right_ascension) + 180.0;
+    hour_angle = (hour_angle * M_PI / 180.0) - M_PI;
+    const double latitude = YORK_LATITUDE_DEG * M_PI / 180.0;
+    const double altitude = asin(sin(latitude) * sin(declination) +
+                                 cos(latitude) * cos(declination) * cos(hour_angle));
+    const double azimuth = wrap_degrees(atan2(
+        sin(hour_angle), cos(hour_angle) * sin(latitude) - tan(declination) * cos(latitude)
+    ) * 180.0 / M_PI + 180.0);
+    double relative = azimuth - NUBBLE_CAMERA_BEARING_DEG;
+    while (relative > 180.0) relative -= 360.0;
+    while (relative < -180.0) relative += 360.0;
+    const double altitude_deg = altitude * 180.0 / M_PI;
+    runtime_state.sun_altitude_deci_deg = (int16_t)lrint(altitude_deg * 10.0);
+    runtime_state.sun_relative_azimuth_deci_deg = (int16_t)lrint(relative * 10.0);
+    runtime_state.sun_mode = altitude_deg >= 0.0 ? 0U :
+                             altitude_deg >= -6.0 ? 1U :
+                             altitude_deg >= -12.0 ? 2U : 3U;
+    return true;
 }
 
 static void initialize_wave_lut(void)
@@ -201,6 +252,8 @@ static void initialize_runtime_state(void)
         .cloud_cover_permille = LUMINARY_CLOUD_COVER_PERMILLE,
         .sky_r = LUMINARY_SKY_R, .sky_g = LUMINARY_SKY_G, .sky_b = LUMINARY_SKY_B,
         .sun_mode = LUMINARY_SUN_MODE,
+        .sun_altitude_deci_deg = LUMINARY_SUN_ALTITUDE_DECI_DEG,
+        .sun_relative_azimuth_deci_deg = LUMINARY_SUN_RELATIVE_AZIMUTH_DECI_DEG,
         .moon_visible = LUMINARY_MOON_VISIBLE,
         .moon_x = LUMINARY_MOON_X, .moon_y = LUMINARY_MOON_Y,
         .moon_illumination_permille = LUMINARY_MOON_ILLUMINATION_PERMILLE,
@@ -327,10 +380,21 @@ static void apply_state_root_locked(cJSON *root)
     }
     cJSON *sun = cJSON_GetObjectItem(root, "sun");
     cJSON *sun_name = sun ? cJSON_GetObjectItem(sun, "state") : NULL;
+    cJSON *sun_altitude = sun ? cJSON_GetObjectItem(sun, "altitude_deg") : NULL;
+    cJSON *sun_azimuth = sun ? cJSON_GetObjectItem(sun, "azimuth_deg") : NULL;
     if (cJSON_IsString(sun_name)) {
         runtime_state.sun_mode = strcmp(sun_name->valuestring, "civil_twilight") == 0 ? 1U :
                                  strcmp(sun_name->valuestring, "nautical_twilight") == 0 ? 2U :
                                  strcmp(sun_name->valuestring, "night") == 0 ? 3U : 0U;
+    }
+    if (cJSON_IsNumber(sun_altitude)) {
+        runtime_state.sun_altitude_deci_deg = (int16_t)lrint(sun_altitude->valuedouble * 10.0);
+    }
+    if (cJSON_IsNumber(sun_azimuth)) {
+        double relative = sun_azimuth->valuedouble - 90.0;
+        while (relative > 180.0) relative -= 360.0;
+        while (relative < -180.0) relative += 360.0;
+        runtime_state.sun_relative_azimuth_deci_deg = (int16_t)lrint(relative * 10.0);
     }
     cJSON *moon = cJSON_GetObjectItem(root, "moon");
     cJSON *visible = moon ? cJSON_GetObjectItem(moon, "visible") : NULL;
@@ -557,8 +621,10 @@ static esp_err_t pull_runtime_bundle(void)
     apply_state_root_locked(scene);
     strlcpy(active_bundle_id, bundle->valuestring, sizeof(active_bundle_id));
     xSemaphoreGive(runtime_lock);
-    ESP_LOGI(TAG, "Autonomous runtime bundle %s activated; cloud=%u/1000",
-             active_bundle_id, runtime_state.cloud_cover_permille);
+    ESP_LOGI(TAG, "Autonomous runtime bundle %s activated; cloud=%u/1000; sun alt=%.1f deg rel-az=%.1f deg",
+             active_bundle_id, runtime_state.cloud_cover_permille,
+             runtime_state.sun_altitude_deci_deg / 10.0,
+             runtime_state.sun_relative_azimuth_deci_deg / 10.0);
     result = ESP_OK;
 
 cleanup:
@@ -639,6 +705,28 @@ static inline uint8_t clamp_channel(int value)
     return (uint8_t)(value < 0 ? 0 : value > 255 ? 255 : value);
 }
 
+static unsigned sunset_warmth_255(void)
+{
+    // Begin golden hour at +10 degrees, peak just after the apparent disc
+    // reaches the horizon, then fade naturally through civil twilight.
+    const int altitude = runtime_state.sun_altitude_deci_deg;
+    if (altitude >= 100) return 0U;
+    if (altitude >= 0) return (unsigned)((100 - altitude) * 220 / 100);
+    if (altitude >= -10) return (unsigned)(220 + (-altitude) * 2);
+    if (altitude >= -60) return (unsigned)(240 - ((-altitude - 10) * 160 / 50));
+    if (altitude >= -120) return (unsigned)((120 + altitude) * 80 / 60);
+    return 0U;
+}
+
+static unsigned sunset_horizontal_255(unsigned x)
+{
+    // Sunset is behind the east-facing Nubble view. Preserve that geometry:
+    // no false disc, only a broad side-weighted atmospheric illumination.
+    const int relative = runtime_state.sun_relative_azimuth_deci_deg;
+    if (relative < 0) return 255U - x * 96U / (LUMINARY_WIDTH - 1U);
+    return 159U + x * 96U / (LUMINARY_WIDTH - 1U);
+}
+
 static void grade_sky_pixel(uint8_t *bgr, unsigned x, unsigned y)
 {
     // Preserve the authored luminance gradient while matching the live-camera
@@ -646,12 +734,21 @@ static void grade_sky_pixel(uint8_t *bgr, unsigned x, unsigned y)
     bgr[0] = clamp_channel((int)bgr[0] + (int)runtime_state.sky_b - (int)LUMINARY_SKY_B);
     bgr[1] = clamp_channel((int)bgr[1] + (int)runtime_state.sky_g - (int)LUMINARY_SKY_G);
     bgr[2] = clamp_channel((int)bgr[2] + (int)runtime_state.sky_r - (int)LUMINARY_SKY_R);
-    if (runtime_state.sun_mode == 1U) {
+    const unsigned warmth = sunset_warmth_255();
+    if (warmth > 0U) {
         const unsigned distance = LUMINARY_RUNTIME_HORIZON - y;
-        const unsigned glow = distance < 150U ? (150U - distance) * 150U / 150U : 0U;
-        bgr[0] = (uint8_t)((bgr[0] * (255U - glow) + 93U * glow) / 255U);
-        bgr[1] = (uint8_t)((bgr[1] * (255U - glow) + 145U * glow) / 255U);
-        bgr[2] = (uint8_t)((bgr[2] * (255U - glow) + 236U * glow) / 255U);
+        const unsigned vertical = distance < 190U ? (190U - distance) * 255U / 190U : 0U;
+        const unsigned glow = warmth * vertical / 255U * sunset_horizontal_255(x) / 255U;
+        bgr[0] = (uint8_t)((bgr[0] * (255U - glow) + 78U * glow) / 255U);
+        bgr[1] = (uint8_t)((bgr[1] * (255U - glow) + 126U * glow) / 255U);
+        bgr[2] = (uint8_t)((bgr[2] * (255U - glow) + 248U * glow) / 255U);
+    }
+    if (runtime_state.sun_mode == 1U && runtime_state.sun_altitude_deci_deg < 0) {
+        const unsigned depth = (unsigned)fmin(60.0, -(double)runtime_state.sun_altitude_deci_deg);
+        const unsigned light = 255U - depth * 85U / 60U;
+        bgr[0] = (uint8_t)(bgr[0] * light / 255U);
+        bgr[1] = (uint8_t)(bgr[1] * light / 255U);
+        bgr[2] = (uint8_t)(bgr[2] * light / 255U);
     } else if (runtime_state.sun_mode == 2U) {
         bgr[0] = (uint8_t)(bgr[0] * 56U / 100U);
         bgr[1] = (uint8_t)(bgr[1] * 43U / 100U);
@@ -685,13 +782,16 @@ static void grade_sky_pixel(uint8_t *bgr, unsigned x, unsigned y)
 
 static void grade_water_pixel(uint8_t *bgr, unsigned y)
 {
-    if (runtime_state.sun_mode == 1U) {
+    const unsigned warmth = sunset_warmth_255();
+    if (warmth > 0U) {
         const unsigned distance = y - LUMINARY_RUNTIME_HORIZON;
-        const unsigned glow = distance < 130U ? (130U - distance) * 46U / 130U : 0U;
-        bgr[0] = (uint8_t)((bgr[0] * (255U - glow) + 88U * glow) / 255U);
-        bgr[1] = (uint8_t)((bgr[1] * (255U - glow) + 120U * glow) / 255U);
-        bgr[2] = (uint8_t)((bgr[2] * (255U - glow) + 205U * glow) / 255U);
-    } else if (runtime_state.sun_mode == 2U) {
+        const unsigned vertical = distance < 170U ? (170U - distance) * 255U / 170U : 0U;
+        const unsigned glow = warmth * vertical / 255U * 128U / 255U;
+        bgr[0] = (uint8_t)((bgr[0] * (255U - glow) + 68U * glow) / 255U);
+        bgr[1] = (uint8_t)((bgr[1] * (255U - glow) + 102U * glow) / 255U);
+        bgr[2] = (uint8_t)((bgr[2] * (255U - glow) + 220U * glow) / 255U);
+    }
+    if (runtime_state.sun_mode == 2U) {
         bgr[0] = (uint8_t)(bgr[0] * 52U / 100U);
         bgr[1] = (uint8_t)(bgr[1] * 42U / 100U);
         bgr[2] = (uint8_t)(bgr[2] * 34U / 100U);
@@ -726,15 +826,17 @@ static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint
             const size_t target = pixel * LUMINARY_BPP;
             if (!runtime_water_pixel(pixel)) {
                 memcpy(destination + target, base + target, LUMINARY_BPP);
-                if (y < LUMINARY_RUNTIME_HORIZON) {
-                    grade_sky_pixel(destination + target, x, y);
-                }
                 if (y < LUMINARY_RUNTIME_HORIZON && cloud_cover_permille > 0U) {
                     for (unsigned shell = 0; shell < 3; ++shell) {
                         composite_cloud_shell(destination + target, &runtime_state.shells[shell], x, y,
                                               cloud_shift_x[shell], cloud_shift_y[shell],
                                               cloud_cover_permille);
                     }
+                }
+                if (y < LUMINARY_RUNTIME_HORIZON) {
+                    // Grade the full atmosphere after cloud compositing so
+                    // real clouds catch the same golden-hour illumination.
+                    grade_sky_pixel(destination + target, x, y);
                 }
                 continue;
             }
@@ -860,6 +962,7 @@ void app_main(void)
     uint8_t target = 0;
     uint32_t rendered_frames = 0;
     const int64_t started_us = esp_timer_get_time();
+    time_t last_solar_update = 0;
 
     ESP_LOGI(TAG, "Runtime renderer: continuous %u ms swell from %u deg, height %u mm; cloud cover %u/1000",
              LUMINARY_WAVE_PERIOD_MS, LUMINARY_WAVE_FROM_DEG, LUMINARY_WAVE_HEIGHT_MM,
@@ -867,7 +970,14 @@ void app_main(void)
     while (true) {
         const uint64_t elapsed_ms = (uint64_t)(esp_timer_get_time() - started_us) / 1000ULL;
         const int64_t render_started_us = esp_timer_get_time();
+        const time_t wall_clock = time(NULL);
         xSemaphoreTake(runtime_lock, portMAX_DELAY);
+        if (wall_clock - last_solar_update >= 30 && update_solar_position_from_clock(wall_clock)) {
+            last_solar_update = wall_clock;
+            ESP_LOGI(TAG, "Local solar position: alt=%.1f deg rel-az=%.1f deg",
+                     runtime_state.sun_altitude_deci_deg / 10.0,
+                     runtime_state.sun_relative_azimuth_deci_deg / 10.0);
+        }
         const bool cloudy = runtime_state.cloud_cover_permille > 0U;
         render_runtime_frame(framebuffer[target], decoded, elapsed_ms);
         xSemaphoreGive(runtime_lock);

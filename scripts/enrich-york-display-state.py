@@ -95,6 +95,21 @@ def sun_state(altitude_deg: float) -> str:
     return "night"
 
 
+def sun_visual_phase(altitude_deg: float) -> str:
+    """Return a continuous art-direction phase around the horizon crossing."""
+    if altitude_deg >= 10:
+        return "day"
+    if altitude_deg >= 2:
+        return "golden_hour"
+    if altitude_deg >= -0.833:
+        return "sunset"
+    if altitude_deg >= -6:
+        return "civil_twilight"
+    if altitude_deg >= -12:
+        return "nautical_twilight"
+    return "night"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, required=True, help="JSON from fetch-york-conditions.py")
@@ -118,7 +133,9 @@ def main() -> None:
     jd = julian_day(instant)
     sun_altitude, sun_azimuth, sun_lon = solar_position(jd, latitude, longitude)
     moon_altitude, moon_azimuth, illumination = lunar_position(jd, latitude, longitude, sun_lon)
-    state["sun"] = {"state": sun_state(sun_altitude), "altitude_deg": round(sun_altitude, 1),
+    state["sun"] = {"state": sun_state(sun_altitude),
+                    "visual_phase": sun_visual_phase(sun_altitude),
+                    "altitude_deg": round(sun_altitude, 1),
                     "azimuth_deg": round(sun_azimuth, 1), "off_screen": True}
     state["moon"] = {"altitude_deg": round(moon_altitude, 1), "azimuth_deg": round(moon_azimuth, 1),
                      "illumination": round(illumination, 3),

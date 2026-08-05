@@ -105,7 +105,11 @@ def main() -> None:
     ocean_phase[~water] = 0
     ocean_phase.tofile(args.output / "nubble_runtime_ocean_phase.bin")
     sun_modes = {"day": 0, "civil_twilight": 1, "nautical_twilight": 2, "night": 3}
-    sun_mode = sun_modes.get(state.get("sun", {}).get("state", "day"), 0)
+    sun = state.get("sun", {})
+    sun_mode = sun_modes.get(sun.get("state", "day"), 0)
+    sun_altitude_deci_deg = round(float(sun.get("altitude_deg", 45.0)) * 10)
+    sun_relative_azimuth_deci_deg = round(
+        ((float(sun.get("azimuth_deg", 90.0)) - float(state["camera"]["bearing_deg"]) + 180.0) % 360.0 - 180.0) * 10)
     moon = state.get("moon", {})
     if moon.get("visible"):
         moon_relative = math.radians(float(moon.get("azimuth_deg", 0)) - float(state["camera"]["bearing_deg"]))
@@ -124,6 +128,8 @@ def main() -> None:
         f"#define LUMINARY_CLOUD_TEXTURE_WIDTH {cloud_width}U",
         f"#define LUMINARY_CLOUD_TEXTURE_HEIGHT {cloud_height}U",
         f"#define LUMINARY_SUN_MODE {sun_mode}U",
+        f"#define LUMINARY_SUN_ALTITUDE_DECI_DEG {sun_altitude_deci_deg}",
+        f"#define LUMINARY_SUN_RELATIVE_AZIMUTH_DECI_DEG {sun_relative_azimuth_deci_deg}",
         f"#define LUMINARY_MOON_VISIBLE {1 if moon.get('visible') else 0}U",
         f"#define LUMINARY_MOON_X {moon_x}",
         f"#define LUMINARY_MOON_Y {moon_y}",
