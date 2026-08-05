@@ -11,8 +11,13 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "driver/jpeg_decode.h"
+#include "driver/sdspi_host.h"
+#include "driver/spi_common.h"
 #include "cJSON.h"
 #include "esp_check.h"
 #include "esp_crc.h"
@@ -30,12 +35,14 @@
 #include "esp_timer.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
+#include "esp_vfs_fat.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
+#include "sdmmc_cmd.h"
 #include "luminary_runtime_state.h"
 #include "hipparcos_stars.h"
 
@@ -129,6 +136,12 @@ static unsigned visible_star_count;
 #define RUNTIME_STATE_MAX_BYTES    8192U
 #define RUNTIME_URL_MAX_BYTES       512U
 #define RUNTIME_PATH_MAX_BYTES      160U
+#define SD_CACHE_MAGIC       0x434d554cU /* ASCII LUMC, little-endian */
+#define SD_CACHE_VERSION             1U
+#define SD_CACHE_MOUNT       "/sdcard"
+#define SD_CACHE_DIRECTORY   SD_CACHE_MOUNT "/luminary"
+#define SD_CACHE_SLOT_A      SD_CACHE_DIRECTORY "/runtime-a.bundle"
+#define SD_CACHE_SLOT_B      SD_CACHE_DIRECTORY "/runtime-b.bundle"
 #define YORK_LATITUDE_DEG        43.1637
 #define YORK_LONGITUDE_DEG      -70.6480
 #define NUBBLE_CAMERA_BEARING_DEG    90.0
@@ -139,6 +152,23 @@ static unsigned visible_star_count;
 static EventGroupHandle_t wifi_events;
 static unsigned wifi_retry_count;
 static char active_bundle_id[48];
+static bool sd_cache_available;
+static uint64_t sd_cache_sequence;
+
+typedef struct __attribute__((packed)) {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t header_bytes;
+    uint64_t sequence;
+    uint32_t payload_crc32;
+    uint32_t state_bytes;
+    uint32_t cloud_bytes;
+    uint32_t ocean_bytes;
+    char bundle_id[48];
+} sd_cache_header_t;
+
+static bool valid_state_root(cJSON *root);
+static void apply_state_root_locked(cJSON *root);
 
 static void wifi_event_handler(void *argument, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
@@ -362,6 +392,189 @@ static void initialize_runtime_state(void)
         ESP_ERROR_CHECK(runtime_state.shells[index].atlas ? ESP_OK : ESP_ERR_NO_MEM);
         memcpy(runtime_state.shells[index].atlas, embedded[index], CLOUD_ATLAS_BYTES);
     }
+}
+
+static bool read_sd_cache_header(const char *path, sd_cache_header_t *header)
+{
+    FILE *file = fopen(path, "rb");
+    if (!file) return false;
+    const bool valid = fread(header, sizeof(*header), 1, file) == 1 &&
+        header->magic == SD_CACHE_MAGIC && header->version == SD_CACHE_VERSION &&
+        header->header_bytes == sizeof(*header) &&
+        header->state_bytes > 0U && header->state_bytes <= RUNTIME_STATE_MAX_BYTES &&
+        header->cloud_bytes == CLOUD_ATLAS_BYTES && header->ocean_bytes == OCEAN_PHASE_BYTES &&
+        memchr(header->bundle_id, '\0', sizeof(header->bundle_id)) != NULL;
+    fclose(file);
+    return valid;
+}
+
+static esp_err_t activate_sd_cache_file(const char *path, const sd_cache_header_t *expected)
+{
+    esp_err_t result = ESP_FAIL;
+    FILE *file = fopen(path, "rb");
+    uint8_t *state = NULL;
+    uint8_t *cloud[3] = {NULL, NULL, NULL};
+    uint8_t *ocean = NULL;
+    cJSON *scene = NULL;
+    sd_cache_header_t header;
+    if (!file) return ESP_ERR_NOT_FOUND;
+    if (fread(&header, sizeof(header), 1, file) != 1 ||
+        memcmp(&header, expected, sizeof(header)) != 0) {
+        result = ESP_ERR_INVALID_STATE;
+        goto cleanup;
+    }
+    state = malloc(header.state_bytes + 1U);
+    ocean = heap_caps_malloc(OCEAN_PHASE_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    for (unsigned index = 0; index < 3; ++index) {
+        cloud[index] = heap_caps_malloc(CLOUD_ATLAS_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (!state || !ocean || !cloud[0] || !cloud[1] || !cloud[2]) {
+        result = ESP_ERR_NO_MEM;
+        goto cleanup;
+    }
+    uint32_t crc = 0;
+    if (fread(state, header.state_bytes, 1, file) != 1) goto cleanup;
+    crc = esp_crc32_le(crc, state, header.state_bytes);
+    for (unsigned index = 0; index < 3; ++index) {
+        if (fread(cloud[index], CLOUD_ATLAS_BYTES, 1, file) != 1) goto cleanup;
+        crc = esp_crc32_le(crc, cloud[index], CLOUD_ATLAS_BYTES);
+    }
+    if (fread(ocean, OCEAN_PHASE_BYTES, 1, file) != 1 ||
+        fgetc(file) != EOF) goto cleanup;
+    crc = esp_crc32_le(crc, ocean, OCEAN_PHASE_BYTES);
+    if (crc != header.payload_crc32) {
+        result = ESP_ERR_INVALID_CRC;
+        goto cleanup;
+    }
+    state[header.state_bytes] = '\0';
+    scene = cJSON_Parse((char *)state);
+    if (!scene || !valid_state_root(scene)) {
+        result = ESP_ERR_INVALID_RESPONSE;
+        goto cleanup;
+    }
+    xSemaphoreTake(runtime_lock, portMAX_DELAY);
+    for (unsigned index = 0; index < 3; ++index) {
+        memcpy(runtime_state.shells[index].atlas, cloud[index], CLOUD_ATLAS_BYTES);
+    }
+    memcpy(runtime_state.ocean_phase, ocean, OCEAN_PHASE_BYTES);
+    apply_state_root_locked(scene);
+    strlcpy(active_bundle_id, header.bundle_id, sizeof(active_bundle_id));
+    xSemaphoreGive(runtime_lock);
+    sd_cache_sequence = header.sequence;
+    ESP_LOGI(TAG, "SD cache bundle %s activated (sequence %llu)", active_bundle_id,
+             (unsigned long long)sd_cache_sequence);
+    result = ESP_OK;
+
+cleanup:
+    cJSON_Delete(scene);
+    free(state);
+    free(ocean);
+    for (unsigned index = 0; index < 3; ++index) free(cloud[index]);
+    fclose(file);
+    return result;
+}
+
+static void mount_and_load_sd_cache(void)
+{
+    const esp_vfs_fat_sdmmc_mount_config_t mount_config = {
+        .format_if_mount_failed = false,
+        .max_files = 6,
+        .allocation_unit_size = 16U * 1024U,
+    };
+    /* The ESP-C6 already occupies SDMMC slot 1. Use the TF socket's supported
+     * SPI wiring so a missing/bad card cannot tear down the Wi-Fi transport. */
+    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+    const spi_bus_config_t bus = {
+        .mosi_io_num = GPIO_NUM_44,
+        .miso_io_num = GPIO_NUM_39,
+        .sclk_io_num = GPIO_NUM_43,
+        .quadwp_io_num = GPIO_NUM_NC,
+        .quadhd_io_num = GPIO_NUM_NC,
+        .max_transfer_sz = 16U * 1024U,
+    };
+    esp_err_t mounted = spi_bus_initialize(host.slot, &bus, SPI_DMA_CH_AUTO);
+    if (mounted != ESP_OK) {
+        ESP_LOGW(TAG, "Cannot initialize microSD SPI bus (%s); using embedded/network assets",
+                 esp_err_to_name(mounted));
+        return;
+    }
+    sdspi_device_config_t slot = SDSPI_DEVICE_CONFIG_DEFAULT();
+    slot.host_id = host.slot;
+    slot.gpio_cs = GPIO_NUM_42;
+    sdmmc_card_t *card = NULL;
+    mounted = esp_vfs_fat_sdspi_mount(SD_CACHE_MOUNT, &host, &slot, &mount_config, &card);
+    if (mounted != ESP_OK) {
+        spi_bus_free(host.slot);
+        ESP_LOGW(TAG, "No usable microSD cache (%s); using embedded/network assets",
+                 esp_err_to_name(mounted));
+        return;
+    }
+    sd_cache_available = true;
+    if (mkdir(SD_CACHE_DIRECTORY, 0775) != 0 && errno != EEXIST) {
+        ESP_LOGW(TAG, "Cannot create %s; SD cache disabled", SD_CACHE_DIRECTORY);
+        sd_cache_available = false;
+        return;
+    }
+    sd_cache_header_t headers[2];
+    const char *paths[2] = {SD_CACHE_SLOT_A, SD_CACHE_SLOT_B};
+    bool valid[2] = {read_sd_cache_header(paths[0], &headers[0]),
+                     read_sd_cache_header(paths[1], &headers[1])};
+    int first = valid[0] && valid[1] ? (headers[1].sequence > headers[0].sequence ? 1 : 0) :
+                valid[0] ? 0 : valid[1] ? 1 : -1;
+    if (first >= 0) {
+        sd_cache_sequence = headers[first].sequence;
+        if (activate_sd_cache_file(paths[first], &headers[first]) != ESP_OK) {
+            const int second = first ^ 1;
+            if (valid[second]) {
+                sd_cache_sequence = headers[second].sequence;
+                (void)activate_sd_cache_file(paths[second], &headers[second]);
+            }
+        }
+    }
+    ESP_LOGI(TAG, "microSD runtime cache ready%s", first >= 0 ? "" : "; no saved bundle yet");
+}
+
+static esp_err_t persist_sd_cache(const char *bundle_id, const uint8_t *state, size_t state_bytes,
+                                  uint8_t *const cloud[3], const uint8_t *ocean)
+{
+    if (!sd_cache_available) return ESP_ERR_NOT_SUPPORTED;
+    const uint64_t sequence = sd_cache_sequence + 1U;
+    const bool slot_a = (sequence & 1U) == 0U;
+    const char *path = slot_a ? SD_CACHE_SLOT_A : SD_CACHE_SLOT_B;
+    FILE *file = fopen(path, "wb");
+    if (!file) return ESP_FAIL;
+    sd_cache_header_t header = {
+        .magic = 0U, /* Written last: an interrupted slot is never considered valid. */
+        .version = SD_CACHE_VERSION,
+        .header_bytes = sizeof(header),
+        .sequence = sequence,
+        .state_bytes = (uint32_t)state_bytes,
+        .cloud_bytes = CLOUD_ATLAS_BYTES,
+        .ocean_bytes = OCEAN_PHASE_BYTES,
+    };
+    strlcpy(header.bundle_id, bundle_id, sizeof(header.bundle_id));
+    bool ok = fwrite(&header, sizeof(header), 1, file) == 1;
+    uint32_t crc = 0;
+    if (ok) { ok = fwrite(state, state_bytes, 1, file) == 1; crc = esp_crc32_le(crc, state, state_bytes); }
+    for (unsigned index = 0; ok && index < 3; ++index) {
+        ok = fwrite(cloud[index], CLOUD_ATLAS_BYTES, 1, file) == 1;
+        crc = esp_crc32_le(crc, cloud[index], CLOUD_ATLAS_BYTES);
+    }
+    if (ok) { ok = fwrite(ocean, OCEAN_PHASE_BYTES, 1, file) == 1; crc = esp_crc32_le(crc, ocean, OCEAN_PHASE_BYTES); }
+    if (ok) ok = fflush(file) == 0 && fsync(fileno(file)) == 0;
+    if (ok) {
+        header.magic = SD_CACHE_MAGIC;
+        header.payload_crc32 = crc;
+        ok = fseek(file, 0, SEEK_SET) == 0 && fwrite(&header, sizeof(header), 1, file) == 1 &&
+             fflush(file) == 0 && fsync(fileno(file)) == 0;
+    }
+    fclose(file);
+    if (!ok) return ESP_FAIL;
+    sd_cache_sequence = sequence;
+    ESP_LOGI(TAG, "Runtime bundle %s saved to microSD slot %c", bundle_id,
+             slot_a ? 'A' : 'B');
+    return ESP_OK;
 }
 
 static esp_err_t receive_exact(httpd_req_t *request, uint8_t *destination, size_t expected)
@@ -732,6 +945,13 @@ static esp_err_t pull_runtime_bundle(void)
         goto cleanup;
     }
 
+    const esp_err_t cached = persist_sd_cache(bundle->valuestring, state,
+                                               descriptor[4].bytes, cloud, ocean);
+    if (cached != ESP_OK && cached != ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGW(TAG, "Validated bundle could not be cached on microSD: %s",
+                 esp_err_to_name(cached));
+    }
+
     /* One lock protects the complete bundle swap; rendering sees old or new. */
     xSemaphoreTake(runtime_lock, portMAX_DELAY);
     for (unsigned index = 0; index < 3; ++index) {
@@ -1045,6 +1265,7 @@ static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint
 void app_main(void)
 {
     initialize_runtime_state();
+    mount_and_load_sd_cache();
     start_wifi();
     start_runtime_server();
 

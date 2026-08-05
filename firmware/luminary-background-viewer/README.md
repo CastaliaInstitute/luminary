@@ -43,6 +43,14 @@ The scene swap is all-or-nothing:
 
 The cloud and sea fields continue moving from monotonic time while a refresh is downloaded.
 
+## Optional microSD asset cache
+
+Insert a FAT-formatted microSD card in the onboard TF socket to retain the last validated runtime scene across power loss and offline starts. The cache is optional: firmware always boots from its embedded scene when the card is absent, unreadable, or corrupt, and then refreshes over HTTPS when Wi-Fi becomes available.
+
+The P4 stores two alternating files under `/luminary/runtime-{a,b}.bundle`. Each file contains the state JSON, all three cloud atlases, and the ocean phase field with a sequence number and CRC32. The validity marker is written only after the complete file has been flushed, so a power interruption during an update leaves the other slot intact. At boot, firmware validates both slots and activates the newest complete bundle before connecting to the network.
+
+The TF socket runs in its board-supported SPI mode on MISO 39, CS 42, CLK 43, and MOSI 44. This deliberately isolates removable storage from the ESP-C6 Wi-Fi coprocessor, which uses the P4's separate SDIO slot. The fixed Hipparcos catalogue and boot-safe scene remain embedded in flash.
+
 ## Maintenance push API
 
 The P4 still listens on port 80 after Wi-Fi connects for development and recovery:
@@ -101,6 +109,6 @@ idf.py -B build-runtime build
 idf.py -B build-runtime -p /dev/cu.wchusbserial5B901846451 flash monitor
 ```
 
-Only use a serial path after positively identifying this exact P4 board. The current application is about 2.34 MB, leaving roughly 26% of the 3 MB app partition free. Device measurements are approximately 152 ms/frame for clear sea/sky and 284 ms/frame with all three shell samplers active. Firmware therefore uses 6 fps when clear and 3 fps when cloud shells are visible, keeping both modes inside their cadence budgets.
+Only use a serial path after positively identifying this exact P4 board. The current application is about 2.87 MB, leaving roughly 9% of the 3 MB app partition free. Device measurements are approximately 152 ms/frame for clear sea/sky and 284 ms/frame with all three shell samplers active. Firmware therefore uses 6 fps when clear and 3 fps when cloud shells are visible, keeping both modes inside their cadence budgets.
 
 Legacy `.lumv` assets remain under `assets/v2` for comparison, but the production firmware no longer loops finite JPEG sequences.
