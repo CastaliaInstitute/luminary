@@ -86,23 +86,37 @@ def main() -> None:
         raise ValueError("runtime horizon must be row 291")
     ocean = state["ocean"]
     relative = math.radians(float(ocean["wave_from_deg"]) - float(state["camera"]["bearing_deg"]))
-    # Perspective-project the measured dominant wavelength onto the sea plane.
-    # A byte stores one full phase cycle. Runtime advances that phase from
-    # monotonic time, preserving small distant waves and broad foreground swell
-    # without moving the registered horizon.
-    yy, xx = np.mgrid[0:600, 0:1024].astype(np.float64)
+    # Perspective-project up to three observed spectral components onto one
+    # horizontal world-space sea plane. RGB bytes hold one phase per component
+    # at half panel resolution; bilinear geometry is unnecessary because phase
+    # remains smooth over a two-pixel footprint and the physical horizon is
+    # represented independently by the immutable water mask.
+    phase_width, phase_height = 512, 300
+    yy, xx = np.mgrid[0:phase_height, 0:phase_width].astype(np.float64)
+    yy = yy * 2.0 + 0.5
+    xx = xx * 2.0 + 0.5
     focal_x, focal_y = 358.53, 782.79
     depression_px = np.maximum(yy - 291.0, 1.0)
     horizontal_range_m = np.minimum(800.0, 12.0 * focal_y / depression_px)
     azimuth = np.arctan2(xx - 512.0, focal_x)
     forward = horizontal_range_m * np.cos(azimuth)
     cross = horizontal_range_m * np.sin(azimuth)
-    wave_to_relative = math.radians((float(ocean["wave_from_deg"]) + 180.0) -
-                                    float(state["camera"]["bearing_deg"]))
-    along_wave = cross * math.sin(wave_to_relative) + forward * math.cos(wave_to_relative)
-    wavelength = max(float(ocean["dominant_wavelength_m"]), 1.0)
-    ocean_phase = np.mod(np.rint(along_wave / wavelength * 256.0), 256).astype(np.uint8)
-    ocean_phase[~water] = 0
+    components = list(ocean.get("components", []))[:3]
+    if not components:
+        components = [{"name": "dominant", "height_m": ocean["significant_wave_height_m"],
+                       "period_s": ocean["dominant_period_s"],
+                       "wavelength_m": ocean["dominant_wavelength_m"],
+                       "wave_from_deg": ocean["wave_from_deg"]}]
+    ocean_phase = np.zeros((phase_height, phase_width, 3), dtype=np.uint8)
+    water_low = water.reshape(phase_height, 2, phase_width, 2).any(axis=(1, 3))
+    for index, component in enumerate(components):
+        wave_to_relative = math.radians((float(component["wave_from_deg"]) + 180.0) -
+                                        float(state["camera"]["bearing_deg"]))
+        along_wave = cross * math.sin(wave_to_relative) + forward * math.cos(wave_to_relative)
+        wavelength = max(float(component["wavelength_m"]), 1.0)
+        phase = np.mod(np.rint(along_wave / wavelength * 256.0), 256).astype(np.uint8)
+        phase[~water_low] = 0
+        ocean_phase[..., index] = phase
     ocean_phase.tofile(args.output / "nubble_runtime_ocean_phase.bin")
     sun_modes = {"day": 0, "civil_twilight": 1, "nautical_twilight": 2, "night": 3}
     sun = state.get("sun", {})
@@ -139,7 +153,14 @@ def main() -> None:
         f"#define LUMINARY_WAVE_KX_Q10 {round(math.sin(relative) * 1024)}",
         f"#define LUMINARY_WAVE_KY_Q10 {round(math.cos(relative) * 1024)}",
         f"#define LUMINARY_WAVE_FROM_DEG {round(float(ocean['wave_from_deg']))}U",
+        f"#define LUMINARY_WAVE_COMPONENT_COUNT {len(components)}U",
     ]
+    for index in range(3):
+        component = components[index] if index < len(components) else {"height_m": 0, "period_s": 1}
+        lines.extend([
+            f"#define LUMINARY_WAVE_{index}_HEIGHT_MM {round(float(component['height_m']) * 1000)}U",
+            f"#define LUMINARY_WAVE_{index}_PERIOD_MS {round(float(component['period_s']) * 1000)}U",
+        ])
     for shell in state["sky"]["shells"]:
         prefix = shell["name"].upper()
         lines.extend([

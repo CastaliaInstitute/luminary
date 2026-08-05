@@ -16,14 +16,14 @@ Production ESP-IDF firmware for the **Waveshare ESP32-P4-WIFI6-Touch-LCD-7B** on
 
 The base image is decoded once by the P4 JPEG engine. At 6 fps, firmware then:
 
-1. Projects a two-component measured swell through the locked view without moving the horizon.
-2. Restricts deformation and shore foam to the registered water mask.
+1. Projects NDBC's measured swell and wind-wave partitions onto a horizontal world-space sea plane.
+2. Animates surface normals and reflections without translating source pixels, then steepens incoming crests into foam only inside the registered shoreline-distance field.
 3. Composites GOES high, mid, and low cloud shells, each rotated continuously by its own GOES Derived Motion Wind vector and measured cloud height.
 4. Uses the live Nubble camera as the final authority for visible sky color and cloud fraction. A confident clear camera observation sets shell opacity to zero even if an older satellite field contains cloud.
 5. Synchronizes UTC directly with SNTP and recalculates York's actual solar altitude and azimuth on the P4 every 30 seconds. Golden hour begins continuously at +10°, peaks at the horizon crossing, and fades through twilight. Sunset remains physically behind the east-facing camera while warming the correctly oriented horizon, clouds, and water reflection. A moon is drawn only when measured altitude/azimuth places it inside the camera view, before cloud compositing so clouds can occlude it.
 6. Projects the ESA Hipparcos naked-eye catalogue through the same locked camera. ICRS positions receive catalogue proper motion and date precession before conversion to York-local altitude/azimuth. Solar altitude controls limiting magnitude, and the three measured cloud shells attenuate stars rather than allowing them to shine through cloud.
 
-The compiled asset is an offline-safe fallback. In production the P4 polls a versioned HTTPS manifest every five minutes, downloads changed state, three compact 256×96 luminance/alpha shell atlases, and the projected ocean phase field, verifies every size and CRC32, then activates the complete bundle atomically. It keeps rendering the previous validated bundle through network or upstream failures.
+The compiled asset is an offline-safe fallback. In production the P4 polls a versioned HTTPS manifest every five minutes, downloads changed state, three compact 256×96 luminance/alpha cloud-shell atlases, and a compact 512×300 RGB ocean phase atlas containing up to three independently measured wave components. It verifies every size and CRC32, then activates the complete bundle atomically. It keeps rendering the previous validated bundle through network or upstream failures.
 
 For visual QA on the local network, `GET /runtime/screenshot.ppm` returns a lossless capture of the exact BGR888 scanout framebuffer converted to RGB PPM. This captures only display content; the physical Nubble bas-relief remains intentionally absent.
 
@@ -61,7 +61,7 @@ The P4 still listens on port 80 after Wi-Fi connects for development and recover
 - `POST /runtime/ocean-phase`
 - `POST /runtime/state`
 
-Each cloud payload is exactly 49,152 bytes and the ocean phase payload is exactly 614,400 bytes. The host uploads all binary fields first and the JSON state last; the state request is the visible commit point. The device rejects any state whose horizon is not row 291.
+Each cloud payload is exactly 49,152 bytes and the three-component ocean phase payload is exactly 460,800 bytes. The host uploads all binary fields first and the JSON state last; the state request is the visible commit point. The device rejects any state whose horizon is not row 291.
 
 From the repository root:
 
@@ -69,7 +69,7 @@ From the repository root:
 python3 scripts/update-york-runtime.py --deploy
 ```
 
-That command fetches York weather, buoy and tide data, observes the live Nubble camera, downloads GOES C13/ACHA clouds and C14 motion winds, builds and validates the three shells, packs the runtime assets, then atomically deploys them to the P4. Use `--reuse-dmw` only for offline/repeat testing.
+That command fetches York weather, NDBC 44098 standard and spectral-partition observations, and York tide predictions; observes the live Nubble camera; downloads GOES C13/ACHA clouds and C14 motion winds; builds and validates the cloud and sea fields; packs the runtime assets; then atomically deploys them to the P4. Use `--reuse-dmw` only for offline/repeat testing.
 
 ## Optional local builder
 
@@ -109,6 +109,6 @@ idf.py -B build-runtime build
 idf.py -B build-runtime -p /dev/cu.wchusbserial5B901846451 flash monitor
 ```
 
-Only use a serial path after positively identifying this exact P4 board. The current application is about 2.87 MB, leaving roughly 9% of the 3 MB app partition free. Device measurements are approximately 152 ms/frame for clear sea/sky and 284 ms/frame with all three shell samplers active. Firmware therefore uses 6 fps when clear and 3 fps when cloud shells are visible, keeping both modes inside their cadence budgets.
+Only use a serial path after positively identifying this exact P4 board. The current application is about 2.73 MB, leaving roughly 13% of the 3 MB app partition free. Firmware uses 6 fps when clear and 3 fps when cloud shells are visible; confirm both modes against the serial frame-time measurements after changing the renderer.
 
 Legacy `.lumv` assets remain under `assets/v2` for comparison, but the production firmware no longer loops finite JPEG sequences.

@@ -24,9 +24,15 @@ def main() -> None:
         assert "GOES" in shell["wind_source"] or "fallback" in shell["wind_source"]
     ocean = state["ocean"]
     assert ocean["dominant_period_s"] > 0 and ocean["dominant_wavelength_m"] > 0
+    components = ocean["components"]
+    assert 1 <= len(components) <= 3
+    for component in components:
+        assert component["height_m"] >= 0 and component["period_s"] > 0
+        assert component["wavelength_m"] > 0 and 0 <= component["wave_from_deg"] < 360
     assert ocean["advance"] == "continuous spectral phase; no finite loop"
     assert state["sky"]["advance"] == "continuous monotonic time; never reset at asset boundary"
-    print(f"Runtime scene OK: 1024x600, horizon 291, {len(shells)} measured cloud shells, continuous ocean")
+    print(f"Runtime scene OK: 1024x600, horizon 291, {len(shells)} measured cloud shells, "
+          f"{len(components)} measured wave components")
 
 
 if __name__ == "__main__":

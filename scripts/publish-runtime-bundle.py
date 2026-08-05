@@ -34,7 +34,7 @@ def main() -> None:
         "state": args.state,
     }
     expected = {"cloud_high": 49152, "cloud_mid": 49152, "cloud_low": 49152,
-                "ocean_phase": 1024 * 600}
+                "ocean_phase": 512 * 300 * 3}
     payloads: dict[str, bytes] = {}
     for name, source in sources.items():
         payload = source.read_bytes()

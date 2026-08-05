@@ -49,6 +49,22 @@ def main() -> None:
     # Deep-water dispersion: wavelength = g*T^2/(2*pi). This is converted to
     # an image-space displacement only after projection through the camera.
     wavelength = 9.80665 * wave_period * wave_period / (2.0 * math.pi)
+    measured_components = []
+    for component in conditions.get("wave_components", [])[:3]:
+        component_period = float(component["period_s"])
+        measured_components.append({
+            "name": component["name"],
+            "height_m": float(component["height_m"]),
+            "period_s": component_period,
+            "wavelength_m": round(9.80665 * component_period * component_period / (2.0 * math.pi), 3),
+            "wave_from_deg": float(component["wave_from_deg"]),
+            "source": "NDBC 44098 spectral partition observation",
+        })
+    if not measured_components:
+        measured_components.append({"name": "dominant", "height_m": wave_height,
+                                    "period_s": wave_period, "wavelength_m": round(wavelength, 3),
+                                    "wave_from_deg": wave_from,
+                                    "source": "NDBC 44098 standard meteorological observation"})
     state = {
         "schema": "luminary-runtime-scene/v1",
         "updated_at": conditions.get("updated_at"),
@@ -69,6 +85,7 @@ def main() -> None:
             "dominant_wavelength_m": round(wavelength, 3),
             "wave_from_deg": wave_from,
             "phase_velocity_mps": round(wavelength / wave_period, 3),
+            "components": measured_components,
             "wind_from_deg": conditions.get("wind_direction_deg"),
             "wind_knots": conditions.get("wind_knots"),
             "tide_phase": conditions.get("tide", {}).get("phase"),

@@ -84,6 +84,40 @@ def ndbc_wave(url: str) -> dict:
     }
 
 
+COMPASS_DEGREES = {
+    "N": 0.0, "NNE": 22.5, "NE": 45.0, "ENE": 67.5,
+    "E": 90.0, "ESE": 112.5, "SE": 135.0, "SSE": 157.5,
+    "S": 180.0, "SSW": 202.5, "SW": 225.0, "WSW": 247.5,
+    "W": 270.0, "WNW": 292.5, "NW": 315.0, "NNW": 337.5,
+}
+
+
+def ndbc_wave_components(url: str) -> list[dict]:
+    """Read NDBC's observed swell/wind-wave partition for the selected buoy."""
+    lines = [line for line in get_text(url).splitlines() if line and not line.startswith("#")]
+    if not lines:
+        raise ValueError("No realtime NDBC spectral summary")
+    values = lines[0].split()
+    if len(values) < 12:
+        raise ValueError("Incomplete NDBC spectral summary")
+
+    def number(index: int) -> float | None:
+        token = values[index]
+        return None if token in ("MM", "99", "999", "N/A") else float(token)
+
+    components = []
+    for name, height_index, period_index, direction_index in (
+        ("swell", 6, 7, 10), ("wind_wave", 8, 9, 11)
+    ):
+        height = number(height_index)
+        period = number(period_index)
+        direction = COMPASS_DEGREES.get(values[direction_index])
+        if height is not None and period is not None and direction is not None and height > 0:
+            components.append({"name": name, "height_m": height, "period_s": period,
+                               "wave_from_deg": direction, "direction_label": values[direction_index]})
+    return components
+
+
 def tide_state(config: dict, now: datetime) -> dict:
     url = config["ocean"]["tide_url_template"].format(
         begin_date=now.strftime("%Y%m%d"),
@@ -161,6 +195,12 @@ def main() -> None:
         result.update(ndbc_wave(config["ocean"]["wave_url"]))
     except Exception as exc:
         result["degraded_sources"].append({"wave": str(exc)})
+
+    try:
+        result["wave_components"] = ndbc_wave_components(config["ocean"]["wave_spec_url"])
+        result["sources"]["wave_partition"] = config["ocean"]["wave_spec_url"]
+    except Exception as exc:
+        result["degraded_sources"].append({"wave_partition": str(exc)})
 
     try:
         result["tide"] = tide_state(config, now)

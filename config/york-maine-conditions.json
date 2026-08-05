@@ -19,6 +19,7 @@
   "ocean": {
     "wave_station": "44098",
     "wave_url": "https://www.ndbc.noaa.gov/data/realtime2/44098.txt",
+    "wave_spec_url": "https://www.ndbc.noaa.gov/data/realtime2/44098.spec",
     "tide_station": "8419317",
     "tide_url_template": "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?begin_date={begin_date}&end_date={end_date}&station=8419317&product=predictions&datum=MLLW&time_zone=lst_ldt&units=metric&interval=hilo&application=luminary&format=json"
   },

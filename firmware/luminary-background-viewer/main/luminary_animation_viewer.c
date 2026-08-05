@@ -90,6 +90,9 @@ extern const uint8_t nubble_runtime_cloud_high_bin_start[] asm("_binary_nubble_r
 
 static const char *TAG = "luminary-anim";
 static int8_t wave_sine[256];
+static int8_t wave_shade_row[LUMINARY_WIDTH / 2U];
+static uint8_t wave_breaker_phase_row[LUMINARY_WIDTH / 2U];
+static uint8_t wave_color_lut[3][16][256];
 static uint8_t cloud_x_lut[LUMINARY_WIDTH];
 static uint8_t cloud_y_lut[LUMINARY_RUNTIME_HORIZON];
 
@@ -100,6 +103,11 @@ typedef struct {
     uint32_t height_m;
     uint8_t blue_bias;
 } cloud_shell_t;
+
+typedef struct {
+    uint32_t height_mm;
+    uint32_t period_ms;
+} wave_component_t;
 
 typedef struct {
     uint16_t cloud_cover_permille;
@@ -113,6 +121,8 @@ typedef struct {
     uint32_t wave_height_mm;
     uint32_t wave_period_ms;
     int32_t wave_kx_q10, wave_ky_q10;
+    uint8_t wave_component_count;
+    wave_component_t waves[3];
     uint8_t *ocean_phase;
     cloud_shell_t shells[3]; /* high, mid, low */
 } runtime_state_t;
@@ -132,7 +142,10 @@ static visible_star_t visible_stars[MAX_VISIBLE_STARS];
 static unsigned visible_star_count;
 
 #define CLOUD_ATLAS_BYTES (LUMINARY_CLOUD_TEXTURE_WIDTH * LUMINARY_CLOUD_TEXTURE_HEIGHT * 2U)
-#define OCEAN_PHASE_BYTES (LUMINARY_WIDTH * LUMINARY_HEIGHT)
+#define OCEAN_PHASE_WIDTH  (LUMINARY_WIDTH / 2U)
+#define OCEAN_PHASE_HEIGHT (LUMINARY_HEIGHT / 2U)
+#define OCEAN_PHASE_COMPONENTS 3U
+#define OCEAN_PHASE_BYTES (OCEAN_PHASE_WIDTH * OCEAN_PHASE_HEIGHT * OCEAN_PHASE_COMPONENTS)
 #define RUNTIME_MANIFEST_MAX_BYTES 8192U
 #define RUNTIME_STATE_MAX_BYTES    8192U
 #define RUNTIME_URL_MAX_BYTES       512U
@@ -373,6 +386,12 @@ static void initialize_runtime_state(void)
         .wave_period_ms = LUMINARY_WAVE_PERIOD_MS,
         .wave_kx_q10 = LUMINARY_WAVE_KX_Q10,
         .wave_ky_q10 = LUMINARY_WAVE_KY_Q10,
+        .wave_component_count = LUMINARY_WAVE_COMPONENT_COUNT,
+        .waves = {
+            {LUMINARY_WAVE_0_HEIGHT_MM, LUMINARY_WAVE_0_PERIOD_MS},
+            {LUMINARY_WAVE_1_HEIGHT_MM, LUMINARY_WAVE_1_PERIOD_MS},
+            {LUMINARY_WAVE_2_HEIGHT_MM, LUMINARY_WAVE_2_PERIOD_MS},
+        },
         .shells = {
             {NULL, LUMINARY_HIGH_WIND_EAST_MMPS, LUMINARY_HIGH_WIND_NORTH_MMPS,
              LUMINARY_HIGH_CLOUD_HEIGHT_M, 14U},
@@ -652,7 +671,8 @@ static esp_err_t ocean_phase_upload_handler(httpd_req_t *request)
     const esp_err_t result = receive_exact(request, incoming, OCEAN_PHASE_BYTES);
     if (result != ESP_OK) {
         free(incoming);
-        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "ocean phase must be 614400 bytes");
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST,
+                                   "ocean phase atlas must be 460800 bytes");
     }
     xSemaphoreTake(runtime_lock, portMAX_DELAY);
     memcpy(runtime_state.ocean_phase, incoming, OCEAN_PHASE_BYTES);
@@ -707,6 +727,26 @@ static void apply_state_root_locked(cJSON *root)
         const double relative = (direction->valuedouble - 90.0) * 3.141592653589793 / 180.0;
         runtime_state.wave_kx_q10 = (int32_t)lrint(sin(relative) * 1024.0);
         runtime_state.wave_ky_q10 = (int32_t)lrint(cos(relative) * 1024.0);
+    }
+    cJSON *components = ocean ? cJSON_GetObjectItem(ocean, "components") : NULL;
+    if (cJSON_IsArray(components)) {
+        const unsigned count = (unsigned)fmin(3.0, cJSON_GetArraySize(components));
+        runtime_state.wave_component_count = (uint8_t)count;
+        for (unsigned index = 0; index < 3U; ++index) {
+            runtime_state.waves[index] = (wave_component_t){0U, 1000U};
+            if (index >= count) continue;
+            cJSON *component = cJSON_GetArrayItem(components, index);
+            cJSON *component_height = cJSON_GetObjectItem(component, "height_m");
+            cJSON *component_period = cJSON_GetObjectItem(component, "period_s");
+            if (cJSON_IsNumber(component_height)) {
+                runtime_state.waves[index].height_mm =
+                    (uint32_t)fmax(0.0, lrint(component_height->valuedouble * 1000.0));
+            }
+            if (cJSON_IsNumber(component_period)) {
+                runtime_state.waves[index].period_ms =
+                    (uint32_t)fmax(500.0, lrint(component_period->valuedouble * 1000.0));
+            }
+        }
     }
     cJSON *sun = cJSON_GetObjectItem(root, "sun");
     cJSON *sun_name = sun ? cJSON_GetObjectItem(sun, "state") : NULL;
@@ -1233,10 +1273,51 @@ static void overlay_real_stars(uint8_t *destination, const int shift_x[3], const
 
 static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint64_t elapsed_ms)
 {
+    // Start from the authored frame in one DMA-friendly copy. Per-pixel
+    // three-byte memcpy calls were dominating render time on the P4.
+    memcpy(destination, base, LUMINARY_FRAME_BYTES);
+    const unsigned reflected[3] = {runtime_state.sky_b, runtime_state.sky_g,
+                                   runtime_state.sky_r};
+    const unsigned water_warmth = sunset_warmth_255();
+    // Reflection and night grading depend only on the source channel and the
+    // 16 quantized normal values. Build the result once per frame instead of
+    // performing six multiplies for every water pixel in PSRAM.
+    for (unsigned channel = 0; channel < 3U; ++channel) {
+        for (unsigned shade_index = 0; shade_index < 16U; ++shade_index) {
+            const int shade = -30 + (int)shade_index * 4;
+            const unsigned glint = shade >= 0 ? (unsigned)shade * 3U : 0U;
+            for (unsigned source = 0; source < 256U; ++source) {
+                int value = (int)source;
+                if (shade >= 0) {
+                    value += ((int)reflected[channel] - value) * (int)glint >> 7;
+                }
+                value = (int)clamp_channel(value + shade);
+                if (runtime_state.sun_mode == 2U) {
+                    static const unsigned scale[3] = {52U, 42U, 34U};
+                    value = value * (int)scale[channel] / 100;
+                } else if (runtime_state.sun_mode == 3U) {
+                    static const unsigned scale[3] = {34U, 24U, 18U};
+                    value = value * (int)scale[channel] / 100;
+                }
+                wave_color_lut[channel][shade_index][source] = (uint8_t)value;
+            }
+        }
+    }
     const unsigned cloud_cover_permille = runtime_state.cloud_cover_permille;
-    const uint32_t wave_period_ms = runtime_state.wave_period_ms > 500U ? runtime_state.wave_period_ms : 500U;
-    const uint32_t phase = (uint32_t)((elapsed_ms * 256ULL / wave_period_ms) & 255ULL);
-    const int amplitude = 2 + (int)(runtime_state.wave_height_mm / 450U);
+    const unsigned component_count = runtime_state.wave_component_count > 0U ?
+                                     (runtime_state.wave_component_count > 3U ? 3U :
+                                      runtime_state.wave_component_count) : 1U;
+    uint8_t wave_time_phase[3] = {0U, 0U, 0U};
+    int wave_weight[3] = {1, 1, 1};
+    int total_wave_weight = 0;
+    for (unsigned component = 0; component < component_count; ++component) {
+        const wave_component_t *wave = &runtime_state.waves[component];
+        const uint32_t period_ms = wave->period_ms > 500U ? wave->period_ms : 500U;
+        wave_time_phase[component] = (uint8_t)(elapsed_ms * 256ULL / period_ms);
+        wave_weight[component] = 1 + (int)(wave->height_mm / 80U > 30U ?
+                                          30U : wave->height_mm / 80U);
+        total_wave_weight += wave_weight[component];
+    }
     int cloud_shift_x[3] = {0};
     int cloud_shift_y[3] = {0};
     if (cloud_cover_permille > 0U) {
@@ -1250,11 +1331,35 @@ static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint
         }
     }
     for (unsigned y = 0; y < LUMINARY_HEIGHT; ++y) {
+        if (y >= LUMINARY_RUNTIME_HORIZON &&
+            (((y & 1U) == 0U) || y == LUMINARY_RUNTIME_HORIZON)) {
+            const size_t phase_row = (size_t)(y >> 1U) * OCEAN_PHASE_WIDTH *
+                                     OCEAN_PHASE_COMPONENTS;
+            const int shade_recip_q16 = total_wave_weight > 0 ?
+                                         65536 / (total_wave_weight * 4) : 0;
+            for (unsigned phase_x = 0; phase_x < OCEAN_PHASE_WIDTH; ++phase_x) {
+                const size_t phase_pixel = phase_row + phase_x * OCEAN_PHASE_COMPONENTS;
+                int normal_light = 0;
+                uint8_t dominant_phase = 0;
+                for (unsigned component = 0; component < component_count; ++component) {
+                    const uint8_t surface_phase =
+                        (uint8_t)(runtime_state.ocean_phase[phase_pixel + component] -
+                                  wave_time_phase[component]);
+                    if (component == 0U) dominant_phase = surface_phase;
+                    normal_light += wave_sine[(uint8_t)(surface_phase + 64U)] *
+                                    wave_weight[component];
+                }
+                int shade = normal_light * shade_recip_q16 >> 16;
+                if (shade < -32) shade = -32;
+                if (shade > 31) shade = 31;
+                wave_shade_row[phase_x] = (int8_t)shade;
+                wave_breaker_phase_row[phase_x] = dominant_phase;
+            }
+        }
         for (unsigned x = 0; x < LUMINARY_WIDTH; ++x) {
             const size_t pixel = (size_t)y * LUMINARY_WIDTH + x;
             const size_t target = pixel * LUMINARY_BPP;
             if (!runtime_water_pixel(pixel)) {
-                memcpy(destination + target, base + target, LUMINARY_BPP);
                 if (y < LUMINARY_RUNTIME_HORIZON && cloud_cover_permille > 0U) {
                     for (unsigned shell = 0; shell < 3; ++shell) {
                         composite_cloud_shell(destination + target, &runtime_state.shells[shell], x, y,
@@ -1269,32 +1374,36 @@ static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint
                 }
                 continue;
             }
-            const unsigned projected = runtime_state.ocean_phase[pixel];
-            // phase(x,t) = k·x - omega*t: crests travel in the measured
-            // wave-to direction on the perspective-projected sea plane.
-            const uint8_t p1 = (uint8_t)((int)projected - (int)phase);
-            const uint8_t p2 = (uint8_t)(((int)projected * 3) / 2 -
-                                         (int)(phase * 2U) + 47);
-            int shift = (wave_sine[p1] * amplitude + wave_sine[p2] * (amplitude / 2 + 1)) / 127;
-            int source_x = (int)x + shift;
-            if (source_x < 0) source_x = 0;
-            if (source_x >= (int)LUMINARY_WIDTH) source_x = LUMINARY_WIDTH - 1;
-            const size_t source = ((size_t)y * LUMINARY_WIDTH + (unsigned)source_x) * LUMINARY_BPP;
-            memcpy(destination + target, base + source, LUMINARY_BPP);
 
-            // Shore-distance is 0 at rock and grows into open water. A crest
-            // can brighten only the first ~12 px of registered water; no
-            // screen-wide white bands and no foam over physical land.
+            // Each channel is k·x on the same perspective-projected horizontal
+            // sea plane. Advancing the measured component periods produces a
+            // world-space surface-normal field; source pixels never slide and
+            // the registered horizon therefore cannot move.
+            const unsigned phase_x = x >> 1U;
+            const int shade = wave_shade_row[phase_x];
+            const unsigned shade_index = (unsigned)(shade + 32) >> 2U;
+            const uint8_t dominant_phase = wave_breaker_phase_row[phase_x];
+            destination[target] = wave_color_lut[0][shade_index][destination[target]];
+            destination[target + 1U] = wave_color_lut[1][shade_index][destination[target + 1U]];
+            destination[target + 2U] = wave_color_lut[2][shade_index][destination[target + 2U]];
+
+            // Shore distance is zero at physical rock. The phase bends over
+            // the final pixels so an incoming crest steepens and rises into
+            // foam at that exact boundary, never over land.
             const uint8_t shore = nubble_runtime_shore_distance_bin_start[pixel];
-            const int crest = wave_sine[p1];
-            if (shore < 32U && crest > 72) {
-                const unsigned foam = (unsigned)((crest - 72) * (32U - shore)) / 60U;
-                for (unsigned channel = 0; channel < 3; ++channel) {
-                    unsigned value = destination[target + channel];
-                    destination[target + channel] = (uint8_t)(value + ((255U - value) * foam >> 8));
+            if (shore < 36U) {
+                const int crest = wave_sine[(uint8_t)(dominant_phase + shore * 5U)];
+                if (crest > 58) {
+                    const unsigned foam = (unsigned)((crest - 58) * (36U - shore)) / 48U;
+                    for (unsigned channel = 0; channel < 3U; ++channel) {
+                        unsigned value = destination[target + channel];
+                        const unsigned bounded_foam = foam > 240U ? 240U : foam;
+                        destination[target + channel] = (uint8_t)(value +
+                            ((255U - value) * bounded_foam >> 8));
+                    }
                 }
             }
-            grade_water_pixel(destination + target, y);
+            if (water_warmth > 0U) grade_water_pixel(destination + target, y);
         }
     }
     overlay_real_stars(destination, cloud_shift_x, cloud_shift_y, cloud_cover_permille);
@@ -1351,6 +1460,9 @@ void app_main(void)
 
     uint8_t *framebuffer[2] = {NULL, NULL};
     ESP_ERROR_CHECK(esp_lcd_dpi_panel_get_frame_buffer(panel, 2, (void **)&framebuffer[0], (void **)&framebuffer[1]));
+    uint8_t *render_buffer = heap_caps_malloc(LUMINARY_FRAME_BYTES,
+                                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    ESP_ERROR_CHECK(render_buffer ? ESP_OK : ESP_ERR_NO_MEM);
 
     jpeg_decode_memory_alloc_cfg_t input_config = {.buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER};
     jpeg_decode_memory_alloc_cfg_t output_config = {.buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER};
@@ -1411,7 +1523,11 @@ void app_main(void)
                      visible_star_count);
         }
         const bool cloudy = runtime_state.cloud_cover_permille > 0U;
-        render_runtime_frame(framebuffer[target], decoded, elapsed_ms);
+        // Compose in cacheable PSRAM. The DPI scanout buffers are optimized
+        // for DMA rather than random CPU writes, so touch each only once with
+        // a contiguous transfer after the frame is complete.
+        render_runtime_frame(render_buffer, decoded, elapsed_ms);
+        memcpy(framebuffer[target], render_buffer, LUMINARY_FRAME_BYTES);
         current_framebuffer = framebuffer[target];
         xSemaphoreGive(runtime_lock);
         const int64_t render_us = esp_timer_get_time() - render_started_us;
@@ -1420,7 +1536,8 @@ void app_main(void)
         ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel, 0, 0, LUMINARY_WIDTH, LUMINARY_HEIGHT, framebuffer[target]));
 
         target ^= 1U;
-        if ((++rendered_frames % 60U) == 0U) {
+        ++rendered_frames;
+        if (rendered_frames <= 3U || (rendered_frames % 30U) == 0U) {
             ESP_LOGI(TAG, "runtime cadence: render=%lld us, uptime=%llu ms",
                      (long long)render_us, (unsigned long long)elapsed_ms);
         }
