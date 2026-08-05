@@ -110,6 +110,7 @@ typedef struct {
 
 static runtime_state_t runtime_state;
 static SemaphoreHandle_t runtime_lock;
+static const uint8_t *current_framebuffer;
 
 #define CLOUD_ATLAS_BYTES (LUMINARY_CLOUD_TEXTURE_WIDTH * LUMINARY_CLOUD_TEXTURE_HEIGHT * 2U)
 #define OCEAN_PHASE_BYTES (LUMINARY_WIDTH * LUMINARY_HEIGHT)
@@ -441,6 +442,44 @@ static esp_err_t state_upload_handler(httpd_req_t *request)
     return httpd_resp_sendstr(request, "ok\n");
 }
 
+static esp_err_t screenshot_handler(httpd_req_t *request)
+{
+    uint8_t *snapshot = heap_caps_malloc(LUMINARY_FRAME_BYTES,
+                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!snapshot) return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR, "no memory");
+    xSemaphoreTake(runtime_lock, portMAX_DELAY);
+    if (!current_framebuffer) {
+        xSemaphoreGive(runtime_lock);
+        free(snapshot);
+        return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR, "frame not ready");
+    }
+    memcpy(snapshot, current_framebuffer, LUMINARY_FRAME_BYTES);
+    xSemaphoreGive(runtime_lock);
+
+    // The scanout buffer is BGR888. PPM is deliberately used here because it
+    // preserves the exact displayed pixels without adding a JPEG encoder to
+    // production firmware; the host can losslessly convert it to PNG.
+    for (size_t pixel = 0; pixel < (size_t)LUMINARY_WIDTH * LUMINARY_HEIGHT; ++pixel) {
+        const uint8_t blue = snapshot[pixel * 3U];
+        snapshot[pixel * 3U] = snapshot[pixel * 3U + 2U];
+        snapshot[pixel * 3U + 2U] = blue;
+    }
+    httpd_resp_set_type(request, "image/x-portable-pixmap");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    char header[32];
+    const int header_bytes = snprintf(header, sizeof(header), "P6\n%u %u\n255\n",
+                                      LUMINARY_WIDTH, LUMINARY_HEIGHT);
+    esp_err_t result = httpd_resp_send_chunk(request, header, header_bytes);
+    for (size_t offset = 0; result == ESP_OK && offset < LUMINARY_FRAME_BYTES; offset += 65536U) {
+        const size_t remaining = LUMINARY_FRAME_BYTES - offset;
+        const size_t chunk = remaining < 65536U ? remaining : 65536U;
+        result = httpd_resp_send_chunk(request, (const char *)snapshot + offset, chunk);
+    }
+    if (result == ESP_OK) result = httpd_resp_send_chunk(request, NULL, 0);
+    free(snapshot);
+    return result;
+}
+
 static void start_runtime_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -450,6 +489,9 @@ static void start_runtime_server(void)
     const httpd_uri_t state_uri = {.uri = "/runtime/state", .method = HTTP_POST,
                                    .handler = state_upload_handler};
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &state_uri));
+    const httpd_uri_t screenshot_uri = {.uri = "/runtime/screenshot.ppm", .method = HTTP_GET,
+                                        .handler = screenshot_handler};
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &screenshot_uri));
     const char *uris[] = {"/runtime/cloud/high", "/runtime/cloud/mid", "/runtime/cloud/low"};
     for (unsigned index = 0; index < 3; ++index) {
         const httpd_uri_t uri = {.uri = uris[index], .method = HTTP_POST,
@@ -980,6 +1022,7 @@ void app_main(void)
         }
         const bool cloudy = runtime_state.cloud_cover_permille > 0U;
         render_runtime_frame(framebuffer[target], decoded, elapsed_ms);
+        current_framebuffer = framebuffer[target];
         xSemaphoreGive(runtime_lock);
         const int64_t render_us = esp_timer_get_time() - render_started_us;
         // Passing the target frame buffer requests an atomic driver-side buffer swap;

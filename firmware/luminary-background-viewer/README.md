@@ -24,6 +24,8 @@ The base image is decoded once by the P4 JPEG engine. At 6 fps, firmware then:
 
 The compiled asset is an offline-safe fallback. In production the P4 polls a versioned HTTPS manifest every five minutes, downloads changed state, three compact 256×96 luminance/alpha shell atlases, and the projected ocean phase field, verifies every size and CRC32, then activates the complete bundle atomically. It keeps rendering the previous validated bundle through network or upstream failures.
 
+For visual QA on the local network, `GET /runtime/screenshot.ppm` returns a lossless capture of the exact BGR888 scanout framebuffer converted to RGB PPM. This captures only display content; the physical Nubble bas-relief remains intentionally absent.
+
 The default endpoint is the repository's force-refreshed `runtime-live` branch on `raw.githubusercontent.com`, which has a valid public TLS chain. `luminary.castalia.institute` mirrors the project site but is not trusted as a firmware endpoint until its custom-domain certificate is valid.
 
 ## Autonomous refresh
