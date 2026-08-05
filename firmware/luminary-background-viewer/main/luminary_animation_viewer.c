@@ -43,6 +43,7 @@
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "sdmmc_cmd.h"
+#include "sd_pwr_ctrl_by_on_chip_ldo.h"
 #include "luminary_runtime_state.h"
 #include "hipparcos_stars.h"
 
@@ -140,8 +141,10 @@ static unsigned visible_star_count;
 #define SD_CACHE_VERSION             1U
 #define SD_CACHE_MOUNT       "/sdcard"
 #define SD_CACHE_DIRECTORY   SD_CACHE_MOUNT "/luminary"
-#define SD_CACHE_SLOT_A      SD_CACHE_DIRECTORY "/runtime-a.bundle"
-#define SD_CACHE_SLOT_B      SD_CACHE_DIRECTORY "/runtime-b.bundle"
+/* Keep cache leaf names FAT 8.3-compatible; long-filename support is deliberately
+ * disabled in this small embedded build. */
+#define SD_CACHE_SLOT_A      SD_CACHE_DIRECTORY "/RUN_A.BIN"
+#define SD_CACHE_SLOT_B      SD_CACHE_DIRECTORY "/RUN_B.BIN"
 #define YORK_LATITUDE_DEG        43.1637
 #define YORK_LONGITUDE_DEG      -70.6480
 #define NUBBLE_CAMERA_BEARING_DEG    90.0
@@ -485,6 +488,15 @@ static void mount_and_load_sd_cache(void)
      * SPI wiring so a missing/bad card cannot tear down the Wi-Fi transport. */
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
     host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+    const sd_pwr_ctrl_ldo_config_t power_config = {.ldo_chan_id = 4};
+    sd_pwr_ctrl_handle_t power = NULL;
+    esp_err_t mounted = sd_pwr_ctrl_new_on_chip_ldo(&power_config, &power);
+    if (mounted != ESP_OK) {
+        ESP_LOGW(TAG, "Cannot power microSD socket (%s); using embedded/network assets",
+                 esp_err_to_name(mounted));
+        return;
+    }
+    host.pwr_ctrl_handle = power;
     const spi_bus_config_t bus = {
         .mosi_io_num = GPIO_NUM_44,
         .miso_io_num = GPIO_NUM_39,
@@ -493,8 +505,9 @@ static void mount_and_load_sd_cache(void)
         .quadhd_io_num = GPIO_NUM_NC,
         .max_transfer_sz = 16U * 1024U,
     };
-    esp_err_t mounted = spi_bus_initialize(host.slot, &bus, SPI_DMA_CH_AUTO);
+    mounted = spi_bus_initialize(host.slot, &bus, SPI_DMA_CH_AUTO);
     if (mounted != ESP_OK) {
+        sd_pwr_ctrl_del_on_chip_ldo(power);
         ESP_LOGW(TAG, "Cannot initialize microSD SPI bus (%s); using embedded/network assets",
                  esp_err_to_name(mounted));
         return;
@@ -506,6 +519,7 @@ static void mount_and_load_sd_cache(void)
     mounted = esp_vfs_fat_sdspi_mount(SD_CACHE_MOUNT, &host, &slot, &mount_config, &card);
     if (mounted != ESP_OK) {
         spi_bus_free(host.slot);
+        sd_pwr_ctrl_del_on_chip_ldo(power);
         ESP_LOGW(TAG, "No usable microSD cache (%s); using embedded/network assets",
                  esp_err_to_name(mounted));
         return;
@@ -543,7 +557,10 @@ static esp_err_t persist_sd_cache(const char *bundle_id, const uint8_t *state, s
     const bool slot_a = (sequence & 1U) == 0U;
     const char *path = slot_a ? SD_CACHE_SLOT_A : SD_CACHE_SLOT_B;
     FILE *file = fopen(path, "wb");
-    if (!file) return ESP_FAIL;
+    if (!file) {
+        ESP_LOGE(TAG, "Cannot open microSD cache slot %s for writing: errno=%d", path, errno);
+        return ESP_FAIL;
+    }
     sd_cache_header_t header = {
         .magic = 0U, /* Written last: an interrupted slot is never considered valid. */
         .version = SD_CACHE_VERSION,
@@ -554,23 +571,44 @@ static esp_err_t persist_sd_cache(const char *bundle_id, const uint8_t *state, s
         .ocean_bytes = OCEAN_PHASE_BYTES,
     };
     strlcpy(header.bundle_id, bundle_id, sizeof(header.bundle_id));
+    const char *failed_step = "header placeholder";
     bool ok = fwrite(&header, sizeof(header), 1, file) == 1;
     uint32_t crc = 0;
-    if (ok) { ok = fwrite(state, state_bytes, 1, file) == 1; crc = esp_crc32_le(crc, state, state_bytes); }
+    if (ok) {
+        failed_step = "runtime state";
+        ok = fwrite(state, state_bytes, 1, file) == 1;
+        crc = esp_crc32_le(crc, state, state_bytes);
+    }
     for (unsigned index = 0; ok && index < 3; ++index) {
+        failed_step = index == 0 ? "high cloud atlas" :
+                      index == 1 ? "middle cloud atlas" : "low cloud atlas";
         ok = fwrite(cloud[index], CLOUD_ATLAS_BYTES, 1, file) == 1;
         crc = esp_crc32_le(crc, cloud[index], CLOUD_ATLAS_BYTES);
     }
-    if (ok) { ok = fwrite(ocean, OCEAN_PHASE_BYTES, 1, file) == 1; crc = esp_crc32_le(crc, ocean, OCEAN_PHASE_BYTES); }
-    if (ok) ok = fflush(file) == 0 && fsync(fileno(file)) == 0;
+    if (ok) {
+        failed_step = "ocean phase";
+        ok = fwrite(ocean, OCEAN_PHASE_BYTES, 1, file) == 1;
+        crc = esp_crc32_le(crc, ocean, OCEAN_PHASE_BYTES);
+    }
+    if (ok) {
+        failed_step = "payload sync";
+        ok = fflush(file) == 0 && fsync(fileno(file)) == 0;
+    }
     if (ok) {
         header.magic = SD_CACHE_MAGIC;
         header.payload_crc32 = crc;
+        failed_step = "committed header";
         ok = fseek(file, 0, SEEK_SET) == 0 && fwrite(&header, sizeof(header), 1, file) == 1 &&
              fflush(file) == 0 && fsync(fileno(file)) == 0;
     }
+    const int saved_errno = errno;
+    const int stream_error = ferror(file);
     fclose(file);
-    if (!ok) return ESP_FAIL;
+    if (!ok) {
+        ESP_LOGE(TAG, "microSD cache write failed during %s: errno=%d ferror=%d",
+                 failed_step, saved_errno, stream_error);
+        return ESP_FAIL;
+    }
     sd_cache_sequence = sequence;
     ESP_LOGI(TAG, "Runtime bundle %s saved to microSD slot %c", bundle_id,
              slot_a ? 'A' : 'B');

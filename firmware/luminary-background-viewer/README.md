@@ -47,9 +47,9 @@ The cloud and sea fields continue moving from monotonic time while a refresh is 
 
 Insert a FAT-formatted microSD card in the onboard TF socket to retain the last validated runtime scene across power loss and offline starts. The cache is optional: firmware always boots from its embedded scene when the card is absent, unreadable, or corrupt, and then refreshes over HTTPS when Wi-Fi becomes available.
 
-The P4 stores two alternating files under `/luminary/runtime-{a,b}.bundle`. Each file contains the state JSON, all three cloud atlases, and the ocean phase field with a sequence number and CRC32. The validity marker is written only after the complete file has been flushed, so a power interruption during an update leaves the other slot intact. At boot, firmware validates both slots and activates the newest complete bundle before connecting to the network.
+The P4 stores two alternating files as `/luminary/RUN_A.BIN` and `/luminary/RUN_B.BIN`. Each file contains the state JSON, all three cloud atlases, and the ocean phase field with a sequence number and CRC32. The validity marker is written only after the complete file has been flushed, so a power interruption during an update leaves the other slot intact. At boot, firmware validates both slots and activates the newest complete bundle before connecting to the network. The short filenames remain compatible with builds that omit FAT long-filename support.
 
-The TF socket runs in its board-supported SPI mode on MISO 39, CS 42, CLK 43, and MOSI 44. This deliberately isolates removable storage from the ESP-C6 Wi-Fi coprocessor, which uses the P4's separate SDIO slot. The fixed Hipparcos catalogue and boot-safe scene remain embedded in flash.
+The TF socket runs in its board-supported SPI mode on MISO 39, CS 42, CLK 43, and MOSI 44. Firmware enables the board's required on-chip LDO channel 4 before card initialization. This deliberately isolates removable storage from the ESP-C6 Wi-Fi coprocessor, which uses the P4's separate SDIO slot. The fixed Hipparcos catalogue and boot-safe scene remain embedded in flash.
 
 ## Maintenance push API
 
