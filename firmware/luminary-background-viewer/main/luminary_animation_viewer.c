@@ -115,6 +115,12 @@ static uint8_t wave_breaker_phase_row[LUMINARY_WIDTH / 2U];
  * must be internal RAM -- but from the heap at renderer start, not .bss:
  * the static image sits against the boot DIRAM ceiling. */
 static uint8_t *wave_foam_row;
+/* Per-cell texture displacement in panel pixels, from the solver's surface
+ * gradient. Shading alone reads as a light wash over a still photograph --
+ * the authored texture's own chop stays frozen. Refracting the source
+ * lookup through the moving surface makes that texture itself move. */
+static int8_t *wave_dx_row;
+static int8_t *wave_dy_row;
 #endif
 
 /* Per-phase render profiling, off by default. Each phase of the frame is
@@ -427,8 +433,15 @@ static void initialize_wave_lut(void)
 #if CONFIG_LUMINARY_OCEAN_SIM
     wave_foam_row = heap_caps_malloc(LUMINARY_WIDTH / 2U,
                                      MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    ESP_ERROR_CHECK(wave_foam_row ? ESP_OK : ESP_ERR_NO_MEM);
+    wave_dx_row = heap_caps_malloc(LUMINARY_WIDTH / 2U,
+                                   MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    wave_dy_row = heap_caps_malloc(LUMINARY_WIDTH / 2U,
+                                   MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    ESP_ERROR_CHECK(wave_foam_row && wave_dx_row && wave_dy_row ?
+                    ESP_OK : ESP_ERR_NO_MEM);
     memset(wave_foam_row, 255, LUMINARY_WIDTH / 2U);
+    memset(wave_dx_row, 0, LUMINARY_WIDTH / 2U);
+    memset(wave_dy_row, 0, LUMINARY_WIDTH / 2U);
 #endif
     for (unsigned index = 0; index < 256; ++index) {
         wave_sine[index] = (int8_t)lrintf(127.0f * sinf((float)index * 6.28318530718f / 256.0f));
@@ -1710,9 +1723,13 @@ static void compute_wave_row_sim(const uint8_t *phase_src, int shade_recip_q16,
             int shade = normal_light * shade_recip_q16 >> 16;
             if (shade < -32) shade = -32;
             if (shade > 31) shade = 31;
-            wave_shade_row[phase_x] = (int8_t)shade;
+            /* Same 4x quantum as the solver cells so one dither pass in the
+             * water row serves both. */
+            wave_shade_row[phase_x] = (int8_t)(shade << 2);
             wave_breaker_phase_row[phase_x] = dominant;
             wave_foam_row[phase_x] = 255u;
+            wave_dx_row[phase_x] = 0;
+            wave_dy_row[phase_x] = 0;
             continue;
         }
         /* Bilinear sample of the solver fields. Nearest-cell sampling drew
@@ -1731,18 +1748,42 @@ static void compute_wave_row_sim(const uint8_t *phase_src, int shade_recip_q16,
         const int top = n00 + ((n01 - n00) * fx >> 8);
         const int bottom = n10 + ((n11 - n10) * fx >> 8);
         const int gradient = top + ((bottom - top) * fy >> 8);
+        const int x00 = normals[2u * cell00];
+        const int x01 = normals[2u * (cell00 + 1u)];
+        const int x10 = normals[2u * cell10];
+        const int x11 = normals[2u * (cell10 + 1u)];
+        const int x_top = x00 + ((x01 - x00) * fx >> 8);
+        const int x_bottom = x10 + ((x11 - x10) * fx >> 8);
+        const int gradient_x = x_top + ((x_bottom - x_top) * fy >> 8);
 
         /* The analytic shade is the surface gradient along the propagation
-         * direction, which travels shoreward: -dh/dy in solver axes. The x6
-         * gain is calibrated to the mild end of the live conditions: a 0.5 m
-         * diffracted swell shows gradients of only a few units, and mapping
-         * those to nothing left the sea visibly frozen. Steeper surf clamps,
-         * which is what a shading LUT wants anyway. */
-        int shade = -gradient * 6;
-        if (shade < -32) shade = -32;
-        if (shade > 31) shade = 31;
+         * direction, which travels shoreward: -dh/dy in solver axes. Carried
+         * at four times the colour LUT's 16-level resolution; the water pass
+         * dithers the quantisation, because at near-field magnification each
+         * LUT step otherwise draws a hard terrace across the cell. The x24
+         * gain is x6 in LUT levels, calibrated to the mild end of the live
+         * conditions: a 0.5 m diffracted swell shows gradients of only a few
+         * units, and mapping those to nothing left the sea visibly frozen. */
+        int shade = -gradient * 24;
+        if (shade < -128) shade = -128;
+        if (shade > 127) shade = 127;
         wave_shade_row[phase_x] = (int8_t)shade;
         wave_breaker_phase_row[phase_x] = 0u;
+
+        /* Refraction: the moving surface displaces where the authored
+         * texture is read from, so the photograph's own chop travels with
+         * the wave instead of sitting frozen under a brightness wash.
+         * Alongshore slope shifts the lookup sideways, shoreward slope
+         * vertically; both are bounded to stay inside the rows the base
+         * copy has recently pulled through the cache. */
+        int dx = gradient_x * 2;
+        if (dx < -7) dx = -7;
+        if (dx > 7) dx = 7;
+        int dy = -gradient;
+        if (dy < -3) dy = -3;
+        if (dy > 3) dy = 3;
+        wave_dx_row[phase_x] = (int8_t)dx;
+        wave_dy_row[phase_x] = (int8_t)dy;
 
         const int f00 = foam[cell00], f01 = foam[cell00 + 1u];
         const int f10 = foam[cell10], f11 = foam[cell10 + 1u];
@@ -1771,7 +1812,9 @@ static void compute_wave_row(const uint8_t *src, int shade_recip_q16)
         int shade = normal_light * shade_recip_q16 >> 16;
         if (shade < -32) shade = -32;
         if (shade > 31) shade = 31;
-        wave_shade_row[phase_x] = (int8_t)shade;
+        /* Shade rows are stored at 4x the colour LUT's quantum everywhere so
+         * the water pass can dither one representation. */
+        wave_shade_row[phase_x] = (int8_t)(shade << 2);
         wave_breaker_phase_row[phase_x] = dominant;
     }
 }
@@ -1907,12 +1950,23 @@ static void render_sky_row(uint8_t *row, unsigned y, const int shift_x[3],
     }
 }
 
+/* 4x4 ordered dither for the shade quantisation, 0..15. Deliberately in
+ * .data rather than flash rodata: it is read once per water pixel from an
+ * IRAM loop. Sixteen bytes of DRAM is the whole cost. */
+static uint8_t shade_dither[4][4] = {
+    {0, 8, 2, 10},
+    {12, 4, 14, 6},
+    {3, 11, 1, 9},
+    {15, 7, 13, 5},
+};
+
 // The water rows get the same treatment as the sky rows, for the same reason:
 // out of line so IRAM_ATTR applies, and with every per-row constant hoisted so
 // the inner loop makes no calls into flash. grade_water_pixel used to be
 // invoked per pixel and re-derived the solar warmth on each call.
 __attribute__((noinline)) IRAM_ATTR
-static void render_water_row(uint8_t *row, unsigned y, unsigned water_warmth)
+static void render_water_row(uint8_t *row, const uint8_t *base, unsigned y,
+                             unsigned water_warmth)
 {
     const size_t row_pixel = (size_t)y * LUMINARY_WIDTH;
     const unsigned sun_mode = runtime_state.sun_mode;
@@ -1929,15 +1983,42 @@ static void render_water_row(uint8_t *row, unsigned y, unsigned water_warmth)
         if (!runtime_water_pixel(pixel)) continue;
         uint8_t *const bgr = row + (size_t)x * LUMINARY_BPP;
 
-        // Each channel is k*x on the same perspective-projected horizontal sea
-        // plane. Advancing the measured component periods produces a
-        // world-space surface-normal field; source pixels never slide and the
-        // registered horizon therefore cannot move.
+        // Shade rows carry four bits of sub-LUT precision; the ordered
+        // dither trades the hard terrace each 16-level step would draw
+        // across a magnified near-field cell for fine noise.
         const unsigned phase_x = x >> 1U;
-        const unsigned shade_index = (unsigned)(wave_shade_row[phase_x] + 32) >> 2U;
+        int quantised = (int)wave_shade_row[phase_x] + 128 +
+                        (int)shade_dither[y & 3U][x & 3U] - 8;
+        if (quantised < 0) quantised = 0;
+        if (quantised > 255) quantised = 255;
+        const unsigned shade_index = (unsigned)quantised >> 4U;
+#if CONFIG_LUMINARY_OCEAN_SIM
+        // Refraction: read the authored texture through the moving surface.
+        // The displaced rows are within a few lines of the current one, so
+        // the reads stay inside what the row copies already cached. The
+        // displacement scales with distance below the horizon: a fixed pixel
+        // shift up near the horizon would correspond to a world-space shift
+        // of tens of metres, and the far field visibly sheared.
+        {
+            const int reach = (int)(y - LUMINARY_RUNTIME_HORIZON);
+            const int taper_q8 = reach >= 160 ? 256 : reach * 256 / 160;
+            int sx = (int)x + (wave_dx_row[phase_x] * taper_q8 >> 8);
+            if (sx < 0) sx = 0;
+            if (sx >= (int)LUMINARY_WIDTH) sx = (int)LUMINARY_WIDTH - 1;
+            int sy = (int)y + (wave_dy_row[phase_x] * taper_q8 >> 8);
+            if (sy < (int)LUMINARY_RUNTIME_HORIZON) sy = (int)LUMINARY_RUNTIME_HORIZON;
+            if (sy >= (int)LUMINARY_HEIGHT) sy = (int)LUMINARY_HEIGHT - 1;
+            const uint8_t *source = base +
+                ((size_t)sy * LUMINARY_WIDTH + (size_t)sx) * LUMINARY_BPP;
+            bgr[0] = wave_color_lut[0][shade_index][source[0]];
+            bgr[1] = wave_color_lut[1][shade_index][source[1]];
+            bgr[2] = wave_color_lut[2][shade_index][source[2]];
+        }
+#else
         bgr[0] = wave_color_lut[0][shade_index][bgr[0]];
         bgr[1] = wave_color_lut[1][shade_index][bgr[1]];
         bgr[2] = wave_color_lut[2][shade_index][bgr[2]];
+#endif
 
 #if CONFIG_LUMINARY_OCEAN_SIM
         // Solver foam: depth-limited breaking measured on the bathymetry,
@@ -2165,7 +2246,7 @@ static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint
             PROF_ADD(prof_sky_us, prof_r0, esp_timer_get_time());
             continue;
         }
-        render_water_row(destination + (size_t)y * row_bytes, y, water_warmth);
+        render_water_row(destination + (size_t)y * row_bytes, base, y, water_warmth);
         PROF_STAMP(prof_r1);
         PROF_ADD(prof_water_us, prof_r0, prof_r1);
     }
