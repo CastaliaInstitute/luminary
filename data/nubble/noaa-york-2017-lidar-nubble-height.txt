@@ -1,0 +1,6 @@
+source=noaa-york-2017-lidar-dem.tif
+crs=NAD83 / UTM zone 19N
+pixel_m=0.5
+crop_utm_bounds=370360.5,4780306.0,370578.5,4780546.0
+valid_elevation_percentiles_m=-0.739,8.424
+ocean_is_nodata; offshore rocks require NOAA bathymetry/photo alignment
