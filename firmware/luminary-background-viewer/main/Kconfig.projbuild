@@ -33,3 +33,17 @@ menu "Luminary Network"
         range 60 86400
 
 endmenu
+
+menu "Luminary Renderer"
+
+    config LUMINARY_RENDER_PROFILING
+        bool "Report per-phase render timings"
+        default n
+        help
+            Time each phase of the frame -- base copy, wave field, sky, water,
+            stars -- and log the breakdown alongside the cadence line. This is
+            the instrumentation the render budget was attributed with. It costs
+            several esp_timer_get_time() calls per scanline, so leave it off
+            for production builds.
+
+endmenu

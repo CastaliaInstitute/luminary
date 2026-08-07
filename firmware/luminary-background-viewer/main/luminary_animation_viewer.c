@@ -19,7 +19,9 @@
 #include "driver/sdspi_host.h"
 #include "driver/spi_common.h"
 #include "cJSON.h"
+#include "esp_attr.h"
 #include "esp_check.h"
+#include "esp_cpu.h"
 #include "esp_crc.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
@@ -53,6 +55,8 @@
 #define LUMINARY_FRAME_BYTES (LUMINARY_WIDTH * LUMINARY_HEIGHT * LUMINARY_BPP)
 #define LUMINARY_DECODE_HEIGHT             608U /* JPEG DMA output is 16-line aligned. */
 #define LUMINARY_DECODE_BYTES (LUMINARY_WIDTH * LUMINARY_DECODE_HEIGHT * LUMINARY_BPP)
+#define LUMINARY_WAVE_CYCLE_MAX_BYTES       (10U * 1024U * 1024U)
+#define LUMINARY_WAVE_CYCLE_MAX_FRAME_BYTES  (2U * 1024U * 1024U)
 
 #define LUMINARY_LCD_RESET_GPIO           33
 #define LUMINARY_MIPI_LDO_CHANNEL          3
@@ -79,6 +83,14 @@ typedef struct __attribute__((packed)) {
     uint32_t length;
 } lumv_frame_t;
 
+typedef struct {
+    uint8_t *payload;
+    size_t payload_bytes;
+    const lumv_frame_t *frames;
+    uint32_t frame_count;
+    uint32_t fps_milli;
+} wave_cycle_t;
+
 extern const uint8_t nubble_runtime_base_jpg_start[] asm("_binary_nubble_runtime_base_jpg_start");
 extern const uint8_t nubble_runtime_base_jpg_end[] asm("_binary_nubble_runtime_base_jpg_end");
 extern const uint8_t nubble_runtime_water_mask_bin_start[] asm("_binary_nubble_runtime_water_mask_bin_start");
@@ -92,6 +104,34 @@ static const char *TAG = "luminary-anim";
 static int8_t wave_sine[256];
 static int8_t wave_shade_row[LUMINARY_WIDTH / 2U];
 static uint8_t wave_breaker_phase_row[LUMINARY_WIDTH / 2U];
+
+/* Per-phase render profiling, off by default. Each phase of the frame is
+ * timed and reported alongside the cadence log, which is how the render budget
+ * was attributed; enable CONFIG_LUMINARY_RENDER_PROFILING to get it back. The
+ * timing calls are compiled out entirely when it is off, so the shipping path
+ * pays nothing for them. */
+#if CONFIG_LUMINARY_RENDER_PROFILING
+static int64_t prof_basecopy_us, prof_lut_us, prof_wave_us,
+               prof_sky_us, prof_water_us, prof_stars_us, prof_fbcopy_us;
+#define PROF_STAMP(name)        const int64_t name = esp_timer_get_time()
+#define PROF_STAMP_MUT(name)    int64_t name = esp_timer_get_time()
+#define PROF_RESTAMP(name)      name = esp_timer_get_time()
+#define PROF_ADD(acc, from, to) ((acc) += (to) - (from))
+#define PROF_SET(acc, from)     ((acc) = esp_timer_get_time() - (from))
+#define PROF_ZERO(...)          do { __VA_ARGS__; } while (0)
+#else
+#define PROF_STAMP(name)        ((void)0)
+#define PROF_STAMP_MUT(name)    ((void)0)
+#define PROF_RESTAMP(name)      ((void)0)
+#define PROF_ADD(acc, from, to) ((void)0)
+#define PROF_SET(acc, from)     ((void)0)
+#define PROF_ZERO(...)          ((void)0)
+#endif
+
+/* Measured: esp_async_memcpy (DMA) for this 1.84 MB PSRAM->PSRAM copy came in
+ * at 47.0 ms against 45.9 ms for plain memcpy. The transfer is bandwidth
+ * bound, not CPU bound, so DMA buys nothing and costs an ISR round trip.
+ * Folding the copy into the per-row work is the promising direction instead. */
 static uint8_t wave_color_lut[3][16][256];
 static uint8_t cloud_x_lut[LUMINARY_WIDTH];
 static uint8_t cloud_y_lut[LUMINARY_RUNTIME_HORIZON];
@@ -129,6 +169,7 @@ typedef struct {
 
 static runtime_state_t runtime_state;
 static SemaphoreHandle_t runtime_lock;
+static wave_cycle_t runtime_wave_cycle;
 static const uint8_t *current_framebuffer;
 
 typedef struct {
@@ -138,7 +179,10 @@ typedef struct {
 } visible_star_t;
 
 #define MAX_VISIBLE_STARS 512U
-static visible_star_t visible_stars[MAX_VISIBLE_STARS];
+// Written once per solar update and read once per frame, so it has no
+// business occupying internal RAM. Moving it to PSRAM frees 3 KB of the
+// internal budget for the IRAM render loops, which do need the speed.
+static visible_star_t *visible_stars;
 static unsigned visible_star_count;
 
 #define CLOUD_ATLAS_BYTES (LUMINARY_CLOUD_TEXTURE_WIDTH * LUMINARY_CLOUD_TEXTURE_HEIGHT * 2U)
@@ -183,6 +227,10 @@ typedef struct __attribute__((packed)) {
     char bundle_id[48];
 } sd_cache_header_t;
 
+static bool parse_lumv_cycle(const uint8_t *payload, size_t payload_bytes,
+                             uint32_t *frame_count, uint32_t *fps_milli,
+                             const lumv_frame_t **frames_out);
+static void release_wave_cycle_locked(void);
 static bool valid_state_root(cJSON *root);
 static void apply_state_root_locked(cJSON *root);
 
@@ -401,6 +449,9 @@ static void initialize_runtime_state(void)
              LUMINARY_LOW_CLOUD_HEIGHT_M, 4U},
         },
     };
+    visible_stars = heap_caps_malloc(sizeof(visible_star_t) * MAX_VISIBLE_STARS,
+                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    ESP_ERROR_CHECK(visible_stars ? ESP_OK : ESP_ERR_NO_MEM);
     runtime_state.ocean_phase = heap_caps_malloc(OCEAN_PHASE_BYTES,
                                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     ESP_ERROR_CHECK(runtime_state.ocean_phase ? ESP_OK : ESP_ERR_NO_MEM);
@@ -682,6 +733,41 @@ static esp_err_t ocean_phase_upload_handler(httpd_req_t *request)
     return httpd_resp_sendstr(request, "ok\n");
 }
 
+static esp_err_t wave_cycle_upload_handler(httpd_req_t *request)
+{
+    if (request->content_len <= 0 || request->content_len > (int)LUMINARY_WAVE_CYCLE_MAX_BYTES) {
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "wave cycle is too large");
+    }
+    uint8_t *incoming = heap_caps_malloc((size_t)request->content_len,
+                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!incoming) return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR, "no memory");
+    const esp_err_t result = receive_exact(request, incoming, (size_t)request->content_len);
+    if (result != ESP_OK) {
+        free(incoming);
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "invalid wave-cycle payload");
+    }
+    uint32_t frame_count = 0U;
+    uint32_t fps_milli = 0U;
+    const lumv_frame_t *frames = NULL;
+    if (!parse_lumv_cycle(incoming, (size_t)request->content_len, &frame_count, &fps_milli, &frames)) {
+        free(incoming);
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST,
+                                  "invalid LUMV wave-cycle payload");
+    }
+    xSemaphoreTake(runtime_lock, portMAX_DELAY);
+    release_wave_cycle_locked();
+    runtime_wave_cycle.payload = incoming;
+    runtime_wave_cycle.payload_bytes = (size_t)request->content_len;
+    runtime_wave_cycle.frames = frames;
+    runtime_wave_cycle.frame_count = frame_count;
+    runtime_wave_cycle.fps_milli = fps_milli;
+    xSemaphoreGive(runtime_lock);
+    ESP_LOGI(TAG, "Wave cycle updated: %u frames at %u.%03u fps",
+             runtime_wave_cycle.frame_count, runtime_wave_cycle.fps_milli / 1000U,
+             runtime_wave_cycle.fps_milli % 1000U);
+    return httpd_resp_sendstr(request, "ok\n");
+}
+
 static bool valid_state_root(cJSON *root)
 {
     cJSON *camera = cJSON_GetObjectItem(root, "camera");
@@ -870,6 +956,9 @@ static void start_runtime_server(void)
     const httpd_uri_t ocean_uri = {.uri = "/runtime/ocean-phase", .method = HTTP_POST,
                                     .handler = ocean_phase_upload_handler};
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &ocean_uri));
+    const httpd_uri_t wave_cycle_uri = {.uri = "/runtime/wave-cycle", .method = HTTP_POST,
+                                       .handler = wave_cycle_upload_handler};
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &wave_cycle_uri));
     ESP_LOGI(TAG, "Live runtime update API listening on port 80");
 }
 
@@ -942,6 +1031,69 @@ static bool parse_remote_asset(cJSON *assets, const char *name, size_t required_
     return true;
 }
 
+static bool parse_remote_cycle_asset(cJSON *assets, const char *name, size_t max_bytes,
+                                    remote_asset_t *asset)
+{
+    cJSON *entry = cJSON_GetObjectItem(assets, name);
+    cJSON *path = entry ? cJSON_GetObjectItem(entry, "path") : NULL;
+    cJSON *bytes = entry ? cJSON_GetObjectItem(entry, "bytes") : NULL;
+    cJSON *crc = entry ? cJSON_GetObjectItem(entry, "crc32") : NULL;
+    if (!cJSON_IsString(path) || !cJSON_IsNumber(bytes) || !cJSON_IsString(crc) ||
+        strlen(path->valuestring) >= sizeof(asset->path) || strlen(crc->valuestring) != 8U) {
+        return false;
+    }
+    asset->bytes = (size_t)bytes->valuedouble;
+    if (asset->bytes == 0U || asset->bytes > max_bytes) return false;
+    char *end = NULL;
+    asset->crc32 = (uint32_t)strtoul(crc->valuestring, &end, 16);
+    if (!end || *end != '\0') return false;
+    strlcpy(asset->path, path->valuestring, sizeof(asset->path));
+    return true;
+}
+
+static bool parse_lumv_cycle(const uint8_t *payload, size_t payload_bytes,
+                             uint32_t *frame_count, uint32_t *fps_milli,
+                             const lumv_frame_t **frames_out)
+{
+    if (!payload || payload_bytes < sizeof(lumv_header_t)) return false;
+    const lumv_header_t *header = (const lumv_header_t *)payload;
+    if (header->magic != LUMV_MAGIC || header->version != LUMV_VERSION ||
+        header->header_bytes != sizeof(lumv_header_t) ||
+        header->width != LUMINARY_WIDTH || header->height != LUMINARY_HEIGHT ||
+        header->frame_count == 0U || header->fps_milli == 0U ||
+        header->frame_count > (UINT32_MAX / sizeof(lumv_frame_t))) {
+        return false;
+    }
+    const size_t index_offset = header->index_offset;
+    const size_t data_offset = header->data_offset;
+    const size_t required_index = sizeof(lumv_header_t) +
+        (size_t)header->frame_count * sizeof(lumv_frame_t);
+    if (index_offset != sizeof(lumv_header_t) || data_offset != required_index ||
+        data_offset > payload_bytes) {
+        return false;
+    }
+    const lumv_frame_t *frames = (const lumv_frame_t *)(payload + index_offset);
+    const lumv_frame_t *end = frames + header->frame_count;
+    for (const lumv_frame_t *frame = frames; frame < end; ++frame) {
+        const size_t offset = frame->offset;
+        const size_t length = frame->length;
+        if (offset < data_offset || length == 0U ||
+            length > payload_bytes || offset > payload_bytes - length) {
+            return false;
+        }
+    }
+    *frame_count = header->frame_count;
+    *fps_milli = header->fps_milli;
+    *frames_out = frames;
+    return true;
+}
+
+static void release_wave_cycle_locked(void)
+{
+    free(runtime_wave_cycle.payload);
+    runtime_wave_cycle = (wave_cycle_t){0};
+}
+
 static esp_err_t download_remote_asset(const remote_asset_t *asset, uint8_t *destination)
 {
     char url[RUNTIME_URL_MAX_BYTES];
@@ -963,6 +1115,11 @@ static esp_err_t pull_runtime_bundle(void)
     uint8_t *cloud[3] = {NULL, NULL, NULL};
     uint8_t *ocean = NULL;
     uint8_t *state = NULL;
+    uint8_t *wave_cycle = NULL;
+    const lumv_frame_t *cycle_frames = NULL;
+    uint32_t cycle_frame_count = 0U;
+    uint32_t cycle_fps_milli = 0U;
+    remote_asset_t cycle_descriptor = {0};
     if (!manifest_bytes) return ESP_ERR_NO_MEM;
 
     char manifest_url[RUNTIME_URL_MAX_BYTES];
@@ -995,11 +1152,14 @@ static esp_err_t pull_runtime_bundle(void)
     }
 
     remote_asset_t descriptor[5];
+    const bool has_cycle = cJSON_GetObjectItem(assets, "wave_cycle") != NULL;
     if (!parse_remote_asset(assets, "cloud_high", CLOUD_ATLAS_BYTES, &descriptor[0]) ||
         !parse_remote_asset(assets, "cloud_mid", CLOUD_ATLAS_BYTES, &descriptor[1]) ||
         !parse_remote_asset(assets, "cloud_low", CLOUD_ATLAS_BYTES, &descriptor[2]) ||
         !parse_remote_asset(assets, "ocean_phase", OCEAN_PHASE_BYTES, &descriptor[3]) ||
-        !parse_remote_asset(assets, "state", 0, &descriptor[4])) {
+        !parse_remote_asset(assets, "state", 0, &descriptor[4]) ||
+        (has_cycle && !parse_remote_cycle_asset(assets, "wave_cycle",
+                                               LUMINARY_WAVE_CYCLE_MAX_BYTES, &cycle_descriptor))) {
         result = ESP_ERR_INVALID_RESPONSE;
         goto cleanup;
     }
@@ -1022,6 +1182,20 @@ static esp_err_t pull_runtime_bundle(void)
         result = ESP_ERR_INVALID_RESPONSE;
         goto cleanup;
     }
+    if (has_cycle) {
+        wave_cycle = heap_caps_malloc(cycle_descriptor.bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!wave_cycle) {
+            result = ESP_ERR_NO_MEM;
+            goto cleanup;
+        }
+        result = download_remote_asset(&cycle_descriptor, wave_cycle);
+        if (result != ESP_OK) goto cleanup;
+        if (!parse_lumv_cycle(wave_cycle, cycle_descriptor.bytes,
+                              &cycle_frame_count, &cycle_fps_milli, &cycle_frames)) {
+            result = ESP_ERR_INVALID_RESPONSE;
+            goto cleanup;
+        }
+    }
 
     const esp_err_t cached = persist_sd_cache(bundle->valuestring, state,
                                                descriptor[4].bytes, cloud, ocean);
@@ -1036,6 +1210,17 @@ static esp_err_t pull_runtime_bundle(void)
         memcpy(runtime_state.shells[index].atlas, cloud[index], CLOUD_ATLAS_BYTES);
     }
     memcpy(runtime_state.ocean_phase, ocean, OCEAN_PHASE_BYTES);
+    if (has_cycle) {
+        release_wave_cycle_locked();
+        runtime_wave_cycle.payload = wave_cycle;
+        runtime_wave_cycle.payload_bytes = cycle_descriptor.bytes;
+        runtime_wave_cycle.frames = cycle_frames;
+        runtime_wave_cycle.frame_count = cycle_frame_count;
+        runtime_wave_cycle.fps_milli = cycle_fps_milli;
+        wave_cycle = NULL;
+    } else {
+        release_wave_cycle_locked();
+    }
     apply_state_root_locked(scene);
     strlcpy(active_bundle_id, bundle->valuestring, sizeof(active_bundle_id));
     xSemaphoreGive(runtime_lock);
@@ -1052,6 +1237,7 @@ cleanup:
     free(state);
     free(ocean);
     for (unsigned index = 0; index < 3; ++index) free(cloud[index]);
+    free(wave_cycle);
     return result;
 }
 
@@ -1271,14 +1457,330 @@ static void overlay_real_stars(uint8_t *destination, const int shift_x[3], const
     }
 }
 
-static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint64_t elapsed_ms)
+// Sine of a Q8.8 phase, linearly interpolated between the two neighbouring
+// LUT entries. Only ever called while building the per-frame tables below, so
+// the interpolation costs 768 evaluations per frame rather than one per cell.
+static int wave_sine_q8(uint32_t phase_q8)
+{
+    const unsigned index = (phase_q8 >> 8) & 0xFFU;
+    const unsigned fraction = phase_q8 & 0xFFU;
+    const int low = wave_sine[index];
+    const int high = wave_sine[(index + 1U) & 0xFFU];
+    return low + (((high - low) * (int)fraction) >> 8);
+}
+
+// Everything in the wave field that depends only on the frame -- the advancing
+// time phase, the sine, and the component weight -- collapses into one table
+// per component, indexed by the component's stored surface phase. The measured
+// effect is large: the original per-cell form cost 1261 cycles per phase cell
+// and was unchanged by IRAM placement, this form costs 40, a 31x reduction.
+//
+// Carrying the time phase in Q8.8 here also removes the original wave stutter
+// for free. Advancing an 8-bit phase quantized each frame's step to a whole
+// unit, swinging apparent wave velocity by up to 39%; the sub-unit phase is
+// resolved once per table entry instead of once per cell, so the inner loop is
+// no more expensive than the version that stuttered.
+static int16_t wave_component_lut[3][256];
+static int8_t wave_crest_lut[256];
+
+static void build_wave_component_luts(const uint16_t *time_phase_q8, const int *weight,
+                                      unsigned component_count)
+{
+    for (unsigned component = 0; component < 3U; ++component) {
+        // Components the scene does not use contribute zero rather than being
+        // skipped, so the per-cell sum stays branchless and fully unrolled.
+        const int component_weight = component < component_count ? weight[component] : 0;
+        const uint32_t phase = component < component_count ? time_phase_q8[component] : 0U;
+        for (unsigned stored = 0; stored < 256U; ++stored) {
+            const uint32_t argument = (((uint32_t)stored + 64U) << 8) - phase;
+            wave_component_lut[component][stored] =
+                (int16_t)(wave_sine_q8(argument & 0xFFFFU) * component_weight);
+        }
+    }
+    // Breaker foam samples the dominant component at a shore-bent phase. Fold
+    // the time phase into its own table too, so the row pass can store the raw
+    // stored phase and the per-pixel lookup stays a single indexed load.
+    for (unsigned stored = 0; stored < 256U; ++stored) {
+        const uint32_t argument = ((uint32_t)stored << 8) - time_phase_q8[0];
+        wave_crest_lut[stored] = (int8_t)wave_sine_q8(argument & 0xFFFFU);
+    }
+}
+
+// Kept out of line and in IRAM deliberately. render_runtime_frame is inlined
+// into its caller, so an IRAM_ATTR there placed nothing -- an earlier
+// measurement concluded IRAM did not matter for exactly that reason. Measured
+// on this loop: 244 cycles per cell from flash against 40 from IRAM.
+__attribute__((noinline)) IRAM_ATTR
+static void compute_wave_row(const uint8_t *src, int shade_recip_q16)
+{
+    for (unsigned phase_x = 0; phase_x < OCEAN_PHASE_WIDTH;
+         ++phase_x, src += OCEAN_PHASE_COMPONENTS) {
+        const uint8_t dominant = src[0];
+        const int normal_light = wave_component_lut[0][dominant] +
+                                 wave_component_lut[1][src[1]] +
+                                 wave_component_lut[2][src[2]];
+        int shade = normal_light * shade_recip_q16 >> 16;
+        if (shade < -32) shade = -32;
+        if (shade > 31) shade = 31;
+        wave_shade_row[phase_x] = (int8_t)shade;
+        wave_breaker_phase_row[phase_x] = dominant;
+    }
+}
+
+// The whole sky row, in IRAM. Cloud compositing was costing over a second per
+// frame because composite_cloud_shell is flash-resident and was called once per
+// shell per sky pixel -- 894k calls, each re-deriving an atlas row that is
+// constant across the row. Hoisting the atlas row out of the pixel loop and
+// moving the loop here took the sky phase from 1105 ms to 95 ms.
+//
+// Shell-outer/pixel-inner keeps the per-pixel blend order identical to the old
+// pixel-outer/shell-inner form -- each pixel still sees high, mid, then low --
+// while letting each shell's atlas row be walked sequentially.
+//
+// Measured, and rejected: fusing the shells and the grading into a single
+// per-pixel pass, so each pixel is read once and written once, is 40x slower
+// (95 ms -> 3792 ms) whether it reads the authored frame directly or the
+// cache-hot copied row. Making the three-shell loop the inner loop puts its
+// hoisted per-shell state into stack arrays that are reloaded per pixel, and
+// that costs far more than the row traversals it saves. Separate sequential
+// passes over a row that is already hot in cache are what this core wants.
+__attribute__((noinline)) IRAM_ATTR
+static void render_sky_row(uint8_t *row, unsigned y, const int shift_x[3],
+                           const int shift_y[3], unsigned cloud_cover_permille)
+{
+    if (cloud_cover_permille > 0U) {
+        // Feather the bottom 22 rows so no shell can create a false horizon.
+        const unsigned clearance = LUMINARY_RUNTIME_HORIZON - y;
+        const unsigned feather = clearance < 22U ? clearance : 22U;
+        for (unsigned shell = 0; shell < 3U; ++shell) {
+            const cloud_shell_t *const shell_state = &runtime_state.shells[shell];
+            // The atlas row depends only on y and this frame's wind offset.
+            const int atlas_y = mirror_cloud_y((int)cloud_y_lut[y] + shift_y[shell]);
+            const uint8_t *const atlas_row = shell_state->atlas +
+                (size_t)atlas_y * LUMINARY_CLOUD_TEXTURE_WIDTH * 2U;
+            const unsigned bias = shell_state->blue_bias;
+            const unsigned half_bias = bias / 2U;
+            const int offset_x = shift_x[shell];
+            uint8_t *bgr = row;
+            for (unsigned x = 0; x < LUMINARY_WIDTH; ++x, bgr += LUMINARY_BPP) {
+                const unsigned atlas_x =
+                    (unsigned)wrap_cloud_x((int)cloud_x_lut[x] + offset_x);
+                const uint8_t *const texel = atlas_row + (size_t)atlas_x * 2U;
+                const unsigned luminance = texel[0];
+                unsigned alpha = texel[1] * cloud_cover_permille / 1000U;
+                alpha = alpha * feather / 22U;
+                if (alpha == 0U) continue;
+                const unsigned cloud_g = luminance > half_bias ? luminance - half_bias : 0U;
+                const unsigned cloud_r = luminance > bias ? luminance - bias : 0U;
+                bgr[0] = (uint8_t)((bgr[0] * (255U - alpha) + luminance * alpha) / 255U);
+                bgr[1] = (uint8_t)((bgr[1] * (255U - alpha) + cloud_g * alpha) / 255U);
+                bgr[2] = (uint8_t)((bgr[2] * (255U - alpha) + cloud_r * alpha) / 255U);
+            }
+        }
+    }
+
+    // Grade the full atmosphere after cloud compositing so real clouds catch
+    // the same golden-hour illumination. Per-pixel calls into flash-resident
+    // helpers used to dominate the frame budget (measured: 3.0 s of a 3.5 s
+    // frame, ~3640 cycles/pixel for ~40 cycles of work), so the solar state is
+    // hoisted to row constants and the inner loop makes no calls.
+    const int shift_b = (int)runtime_state.sky_b - (int)LUMINARY_SKY_B;
+    const int shift_g = (int)runtime_state.sky_g - (int)LUMINARY_SKY_G;
+    const int shift_r = (int)runtime_state.sky_r - (int)LUMINARY_SKY_R;
+    const unsigned warmth = sunset_warmth_255();
+    unsigned glow_row = 0U;
+    if (warmth > 0U) {
+        const unsigned distance = LUMINARY_RUNTIME_HORIZON - y;
+        const unsigned vertical = distance < 190U ? (190U - distance) * 255U / 190U : 0U;
+        glow_row = warmth * vertical / 255U;
+    }
+    const bool sunset_left = runtime_state.sun_relative_azimuth_deci_deg < 0;
+    unsigned mode = 0U;
+    unsigned light = 255U;
+    // Integer clamp, not fmin() on doubles: the P4 FPU is single-precision
+    // only, so a double compare per sky pixel is soft-float emulation.
+    if (runtime_state.sun_mode == 1U && runtime_state.sun_altitude_deci_deg < 0) {
+        const int negative_altitude = -runtime_state.sun_altitude_deci_deg;
+        const unsigned depth = (unsigned)(negative_altitude > 60 ? 60 : negative_altitude);
+        light = 255U - depth * 85U / 60U;
+        mode = 1U;
+    } else if (runtime_state.sun_mode == 2U) {
+        mode = 2U;
+    } else if (runtime_state.sun_mode == 3U) {
+        mode = 3U;
+    }
+
+    for (unsigned x = 0; x < LUMINARY_WIDTH; ++x) {
+        uint8_t *bgr = row + (size_t)x * LUMINARY_BPP;
+        bgr[0] = clamp_channel((int)bgr[0] + shift_b);
+        bgr[1] = clamp_channel((int)bgr[1] + shift_g);
+        bgr[2] = clamp_channel((int)bgr[2] + shift_r);
+        if (warmth > 0U) {
+            const unsigned horizontal = sunset_left ?
+                255U - x * 96U / (LUMINARY_WIDTH - 1U) :
+                159U + x * 96U / (LUMINARY_WIDTH - 1U);
+            const unsigned glow = glow_row * horizontal / 255U;
+            bgr[0] = (uint8_t)((bgr[0] * (255U - glow) + 78U * glow) / 255U);
+            bgr[1] = (uint8_t)((bgr[1] * (255U - glow) + 126U * glow) / 255U);
+            bgr[2] = (uint8_t)((bgr[2] * (255U - glow) + 248U * glow) / 255U);
+        }
+        if (mode == 1U) {
+            bgr[0] = (uint8_t)(bgr[0] * light / 255U);
+            bgr[1] = (uint8_t)(bgr[1] * light / 255U);
+            bgr[2] = (uint8_t)(bgr[2] * light / 255U);
+        } else if (mode == 2U) {
+            bgr[0] = (uint8_t)(bgr[0] * 34U / 100U);
+            bgr[1] = (uint8_t)(bgr[1] * 24U / 100U);
+            bgr[2] = (uint8_t)(bgr[2] * 15U / 100U);
+        } else if (mode == 3U) {
+            bgr[0] = (uint8_t)(bgr[0] * 22U / 100U);
+            bgr[1] = (uint8_t)(bgr[1] * 12U / 100U);
+            bgr[2] = (uint8_t)(bgr[2] * 7U / 100U);
+        }
+    }
+
+    // Only the few pixels inside the moon's disc are revisited.
+    if (runtime_state.moon_visible) {
+        const int dy = (int)y - runtime_state.moon_y;
+        if (dy * dy <= 144) {
+            const int terminator = 12 - (int)(runtime_state.moon_illumination_permille * 24U / 1000U);
+            for (int dx = -12; dx <= 12; ++dx) {
+                const int mx = runtime_state.moon_x + dx;
+                if (mx < 0 || mx >= (int)LUMINARY_WIDTH) continue;
+                if (dx * dx + dy * dy > 144 || dx < terminator) continue;
+                uint8_t *bgr = row + (size_t)mx * LUMINARY_BPP;
+                const unsigned alpha = 185U;
+                bgr[0] = (uint8_t)((bgr[0] * (255U - alpha) + 226U * alpha) / 255U);
+                bgr[1] = (uint8_t)((bgr[1] * (255U - alpha) + 226U * alpha) / 255U);
+                bgr[2] = (uint8_t)((bgr[2] * (255U - alpha) + 214U * alpha) / 255U);
+            }
+        }
+    }
+}
+
+// The water rows get the same treatment as the sky rows, for the same reason:
+// out of line so IRAM_ATTR applies, and with every per-row constant hoisted so
+// the inner loop makes no calls into flash. grade_water_pixel used to be
+// invoked per pixel and re-derived the solar warmth on each call.
+__attribute__((noinline)) IRAM_ATTR
+static void render_water_row(uint8_t *row, unsigned y, unsigned water_warmth)
+{
+    const size_t row_pixel = (size_t)y * LUMINARY_WIDTH;
+    const unsigned sun_mode = runtime_state.sun_mode;
+    unsigned glow = 0U;
+    if (water_warmth > 0U) {
+        const unsigned distance = y - LUMINARY_RUNTIME_HORIZON;
+        const unsigned vertical = distance < 170U ? (170U - distance) * 255U / 170U : 0U;
+        glow = water_warmth * vertical / 255U * 128U / 255U;
+    }
+    for (unsigned x = 0; x < LUMINARY_WIDTH; ++x) {
+        const size_t pixel = row_pixel + x;
+        // Printed rock and shoreline below the horizon: the authored pixel is
+        // already in place from the row copy and no sea shading applies.
+        if (!runtime_water_pixel(pixel)) continue;
+        uint8_t *const bgr = row + (size_t)x * LUMINARY_BPP;
+
+        // Each channel is k*x on the same perspective-projected horizontal sea
+        // plane. Advancing the measured component periods produces a
+        // world-space surface-normal field; source pixels never slide and the
+        // registered horizon therefore cannot move.
+        const unsigned phase_x = x >> 1U;
+        const unsigned shade_index = (unsigned)(wave_shade_row[phase_x] + 32) >> 2U;
+        bgr[0] = wave_color_lut[0][shade_index][bgr[0]];
+        bgr[1] = wave_color_lut[1][shade_index][bgr[1]];
+        bgr[2] = wave_color_lut[2][shade_index][bgr[2]];
+
+        // Shore distance is zero at physical rock. The phase bends over the
+        // final pixels so an incoming crest steepens and rises into foam at
+        // that exact boundary, never over land.
+        const uint8_t shore = nubble_runtime_shore_distance_bin_start[pixel];
+        if (shore < 36U) {
+            // wave_breaker_phase_row holds the stored surface phase, untouched
+            // by time; wave_crest_lut carries this frame's Q8.8 advance, so the
+            // foam edge moves at the same sub-unit rate as the shading.
+            const int crest =
+                wave_crest_lut[(uint8_t)(wave_breaker_phase_row[phase_x] + shore * 5U)];
+            if (crest > 58) {
+                const unsigned foam = (unsigned)((crest - 58) * (36U - shore)) / 48U;
+                const unsigned bounded_foam = foam > 240U ? 240U : foam;
+                for (unsigned channel = 0; channel < 3U; ++channel) {
+                    const unsigned value = bgr[channel];
+                    bgr[channel] = (uint8_t)(value + ((255U - value) * bounded_foam >> 8));
+                }
+            }
+        }
+        if (water_warmth > 0U) {
+            bgr[0] = (uint8_t)((bgr[0] * (255U - glow) + 68U * glow) / 255U);
+            bgr[1] = (uint8_t)((bgr[1] * (255U - glow) + 102U * glow) / 255U);
+            bgr[2] = (uint8_t)((bgr[2] * (255U - glow) + 220U * glow) / 255U);
+            if (sun_mode == 2U) {
+                bgr[0] = (uint8_t)(bgr[0] * 52U / 100U);
+                bgr[1] = (uint8_t)(bgr[1] * 42U / 100U);
+                bgr[2] = (uint8_t)(bgr[2] * 34U / 100U);
+            } else if (sun_mode == 3U) {
+                bgr[0] = (uint8_t)(bgr[0] * 34U / 100U);
+                bgr[1] = (uint8_t)(bgr[1] * 24U / 100U);
+                bgr[2] = (uint8_t)(bgr[2] * 18U / 100U);
+            }
+        }
+    }
+}
+
+// Measured: putting this whole function in IRAM changed nothing (376.5 ms
+// before and after), so it stays in flash rather than spending scarce
+// internal RAM. The wave-field cost is not instruction fetch.
+static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint64_t elapsed_ms,
+                                bool cycle_base)
 {
     // Start from the authored frame in one DMA-friendly copy. Per-pixel
     // three-byte memcpy calls were dominating render time on the P4.
-    memcpy(destination, base, LUMINARY_FRAME_BYTES);
+    PROF_ZERO(prof_wave_us = prof_sky_us = prof_water_us = prof_basecopy_us = 0);
+    PROF_STAMP_MUT(prof_mark);
+    const size_t row_bytes = (size_t)LUMINARY_WIDTH * LUMINARY_BPP;
     const unsigned reflected[3] = {runtime_state.sky_b, runtime_state.sky_g,
                                    runtime_state.sky_r};
     const unsigned water_warmth = sunset_warmth_255();
+
+    if (cycle_base) {
+        memcpy(destination, base, LUMINARY_FRAME_BYTES);
+        const unsigned cloud_cover_permille = runtime_state.cloud_cover_permille;
+        int cloud_shift_x[3] = {0};
+        int cloud_shift_y[3] = {0};
+        if (cloud_cover_permille > 0U) {
+            const int64_t time_ms = (int64_t)(elapsed_ms % 21600000ULL);
+            for (unsigned shell = 0; shell < 3; ++shell) {
+                const int64_t height_mm = (int64_t)runtime_state.shells[shell].height_m * 1000LL;
+                cloud_shift_x[shell] = (int)(-(int64_t)runtime_state.shells[shell].wind_north_mmps *
+                    time_ms * LUMINARY_CLOUD_TEXTURE_WIDTH * 256LL / (height_mm * 1919LL) >> 8);
+                cloud_shift_y[shell] = (int)((int64_t)runtime_state.shells[shell].wind_east_mmps *
+                    time_ms * LUMINARY_CLOUD_TEXTURE_HEIGHT * 256LL / (height_mm * 1187LL) >> 8);
+            }
+        }
+        for (unsigned y = 0; y < LUMINARY_HEIGHT; ++y) {
+            for (unsigned x = 0; x < LUMINARY_WIDTH; ++x) {
+                const size_t pixel = (size_t)y * LUMINARY_WIDTH + x;
+                const size_t target = pixel * LUMINARY_BPP;
+                if (!runtime_water_pixel(pixel)) {
+                    if (y < LUMINARY_RUNTIME_HORIZON && cloud_cover_permille > 0U) {
+                        for (unsigned shell = 0; shell < 3; ++shell) {
+                            composite_cloud_shell(destination + target, &runtime_state.shells[shell],
+                                                  x, y, cloud_shift_x[shell],
+                                                  cloud_shift_y[shell],
+                                                  cloud_cover_permille);
+                        }
+                    }
+                    if (y < LUMINARY_RUNTIME_HORIZON) {
+                        grade_sky_pixel(destination + target, x, y);
+                    }
+                } else if (water_warmth > 0U) {
+                    grade_water_pixel(destination + target, y);
+                }
+            }
+        }
+        overlay_real_stars(destination, cloud_shift_x, cloud_shift_y, cloud_cover_permille);
+        return;
+    }
+
     // Reflection and night grading depend only on the source channel and the
     // 16 quantized normal values. Build the result once per frame instead of
     // performing six multiplies for every water pixel in PSRAM.
@@ -1307,17 +1809,22 @@ static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint
     const unsigned component_count = runtime_state.wave_component_count > 0U ?
                                      (runtime_state.wave_component_count > 3U ? 3U :
                                       runtime_state.wave_component_count) : 1U;
-    uint8_t wave_time_phase[3] = {0U, 0U, 0U};
+    // Q8.8: a whole unit of phase is 256 here. The frame step at 6 fps is a
+    // few units, so rounding it to an integer each frame -- as an 8-bit phase
+    // must -- is what made the swell advance unevenly.
+    uint16_t wave_time_phase_q8[3] = {0U, 0U, 0U};
     int wave_weight[3] = {1, 1, 1};
     int total_wave_weight = 0;
     for (unsigned component = 0; component < component_count; ++component) {
         const wave_component_t *wave = &runtime_state.waves[component];
         const uint32_t period_ms = wave->period_ms > 500U ? wave->period_ms : 500U;
-        wave_time_phase[component] = (uint8_t)(elapsed_ms * 256ULL / period_ms);
+        wave_time_phase_q8[component] =
+            (uint16_t)(elapsed_ms * 65536ULL / period_ms);
         wave_weight[component] = 1 + (int)(wave->height_mm / 80U > 30U ?
                                           30U : wave->height_mm / 80U);
         total_wave_weight += wave_weight[component];
     }
+    build_wave_component_luts(wave_time_phase_q8, wave_weight, component_count);
     int cloud_shift_x[3] = {0};
     int cloud_shift_y[3] = {0};
     if (cloud_cover_permille > 0U) {
@@ -1330,83 +1837,53 @@ static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint
                 time_ms * LUMINARY_CLOUD_TEXTURE_HEIGHT * 256LL / (height_mm * 1187LL) >> 8);
         }
     }
+    PROF_SET(prof_lut_us, prof_mark);
+    // Hoist the phase field out of the inner loop: the compiler cannot prove
+    // the wave_shade_row writes do not alias runtime_state, so it reloads this
+    // pointer on every component of every cell otherwise.
+    const uint8_t *const ocean_phase = runtime_state.ocean_phase;
     for (unsigned y = 0; y < LUMINARY_HEIGHT; ++y) {
+        // Fold the base image copy into the row pass. The same 1.84 MB moves,
+        // but each row is still hot in cache when it is processed, instead of
+        // being written once as a whole frame and re-fetched row by row.
+        //
+        // Measured: eliminating this copy entirely, by reading the authored
+        // pixels straight from `base` inside the sky and water passes, is a
+        // net loss. basecopy went to 0 but sky rose 27.4 -> 52.8 ms and water
+        // 39.6 -> 69.5 ms, for 311 -> 316 ms overall. The copy is not
+        // redundant work: the frame has to read 1.84 MB and write 1.84 MB
+        // either way, and memcpy moves it at ~75 MB/s where scattered
+        // three-byte accesses inside the pixel loops move it slower.
+        PROF_STAMP(prof_c0);
+        memcpy(destination + (size_t)y * row_bytes, base + (size_t)y * row_bytes, row_bytes);
+        PROF_STAMP(prof_w0);
+        PROF_ADD(prof_basecopy_us, prof_c0, prof_w0);
         if (y >= LUMINARY_RUNTIME_HORIZON &&
             (((y & 1U) == 0U) || y == LUMINARY_RUNTIME_HORIZON)) {
             const size_t phase_row = (size_t)(y >> 1U) * OCEAN_PHASE_WIDTH *
                                      OCEAN_PHASE_COMPONENTS;
             const int shade_recip_q16 = total_wave_weight > 0 ?
                                          65536 / (total_wave_weight * 4) : 0;
-            for (unsigned phase_x = 0; phase_x < OCEAN_PHASE_WIDTH; ++phase_x) {
-                const size_t phase_pixel = phase_row + phase_x * OCEAN_PHASE_COMPONENTS;
-                int normal_light = 0;
-                uint8_t dominant_phase = 0;
-                for (unsigned component = 0; component < component_count; ++component) {
-                    const uint8_t surface_phase =
-                        (uint8_t)(runtime_state.ocean_phase[phase_pixel + component] -
-                                  wave_time_phase[component]);
-                    if (component == 0U) dominant_phase = surface_phase;
-                    normal_light += wave_sine[(uint8_t)(surface_phase + 64U)] *
-                                    wave_weight[component];
-                }
-                int shade = normal_light * shade_recip_q16 >> 16;
-                if (shade < -32) shade = -32;
-                if (shade > 31) shade = 31;
-                wave_shade_row[phase_x] = (int8_t)shade;
-                wave_breaker_phase_row[phase_x] = dominant_phase;
-            }
+            compute_wave_row(ocean_phase + phase_row, shade_recip_q16);
         }
-        for (unsigned x = 0; x < LUMINARY_WIDTH; ++x) {
-            const size_t pixel = (size_t)y * LUMINARY_WIDTH + x;
-            const size_t target = pixel * LUMINARY_BPP;
-            if (!runtime_water_pixel(pixel)) {
-                if (y < LUMINARY_RUNTIME_HORIZON && cloud_cover_permille > 0U) {
-                    for (unsigned shell = 0; shell < 3; ++shell) {
-                        composite_cloud_shell(destination + target, &runtime_state.shells[shell], x, y,
-                                              cloud_shift_x[shell], cloud_shift_y[shell],
-                                              cloud_cover_permille);
-                    }
-                }
-                if (y < LUMINARY_RUNTIME_HORIZON) {
-                    // Grade the full atmosphere after cloud compositing so
-                    // real clouds catch the same golden-hour illumination.
-                    grade_sky_pixel(destination + target, x, y);
-                }
-                continue;
-            }
-
-            // Each channel is k·x on the same perspective-projected horizontal
-            // sea plane. Advancing the measured component periods produces a
-            // world-space surface-normal field; source pixels never slide and
-            // the registered horizon therefore cannot move.
-            const unsigned phase_x = x >> 1U;
-            const int shade = wave_shade_row[phase_x];
-            const unsigned shade_index = (unsigned)(shade + 32) >> 2U;
-            const uint8_t dominant_phase = wave_breaker_phase_row[phase_x];
-            destination[target] = wave_color_lut[0][shade_index][destination[target]];
-            destination[target + 1U] = wave_color_lut[1][shade_index][destination[target + 1U]];
-            destination[target + 2U] = wave_color_lut[2][shade_index][destination[target + 2U]];
-
-            // Shore distance is zero at physical rock. The phase bends over
-            // the final pixels so an incoming crest steepens and rises into
-            // foam at that exact boundary, never over land.
-            const uint8_t shore = nubble_runtime_shore_distance_bin_start[pixel];
-            if (shore < 36U) {
-                const int crest = wave_sine[(uint8_t)(dominant_phase + shore * 5U)];
-                if (crest > 58) {
-                    const unsigned foam = (unsigned)((crest - 58) * (36U - shore)) / 48U;
-                    for (unsigned channel = 0; channel < 3U; ++channel) {
-                        unsigned value = destination[target + channel];
-                        const unsigned bounded_foam = foam > 240U ? 240U : foam;
-                        destination[target + channel] = (uint8_t)(value +
-                            ((255U - value) * bounded_foam >> 8));
-                    }
-                }
-            }
-            if (water_warmth > 0U) grade_water_pixel(destination + target, y);
+        PROF_STAMP(prof_r0);
+        PROF_ADD(prof_wave_us, prof_w0, prof_r0);
+        if (y < LUMINARY_RUNTIME_HORIZON) {
+            // The water mask has no set pixels above the horizon (verified
+            // against the asset), so the whole row is sky and can be graded
+            // once per row instead of once per pixel.
+            uint8_t *const sky_row = destination + (size_t)y * row_bytes;
+            render_sky_row(sky_row, y, cloud_shift_x, cloud_shift_y, cloud_cover_permille);
+            PROF_ADD(prof_sky_us, prof_r0, esp_timer_get_time());
+            continue;
         }
+        render_water_row(destination + (size_t)y * row_bytes, y, water_warmth);
+        PROF_STAMP(prof_r1);
+        PROF_ADD(prof_water_us, prof_r0, prof_r1);
     }
+    PROF_RESTAMP(prof_mark);
     overlay_real_stars(destination, cloud_shift_x, cloud_shift_y, cloud_cover_permille);
+    PROF_SET(prof_stars_us, prof_mark);
 }
 
 void app_main(void)
@@ -1414,7 +1891,11 @@ void app_main(void)
     initialize_runtime_state();
     mount_and_load_sd_cache();
     start_wifi();
-    start_runtime_server();
+    if (CONFIG_LUMINARY_WIFI_SSID[0] != '\0') {
+        start_runtime_server();
+    } else {
+        ESP_LOGW(TAG, "Runtime API endpoints disabled: Wi-Fi SSID not configured");
+    }
 
     const uint8_t *asset = nubble_runtime_base_jpg_start;
     const size_t asset_size = nubble_runtime_base_jpg_end - asset;
@@ -1468,9 +1949,14 @@ void app_main(void)
     jpeg_decode_memory_alloc_cfg_t output_config = {.buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER};
     size_t input_capacity = 0;
     size_t decoded_capacity = 0;
-    uint8_t *input = jpeg_alloc_decoder_mem(asset_size + 4096, &input_config, &input_capacity);
+    const size_t minimum_input_capacity = LUMINARY_WAVE_CYCLE_MAX_FRAME_BYTES + 4096U;
+    uint8_t *input = jpeg_alloc_decoder_mem(minimum_input_capacity, &input_config, &input_capacity);
     uint8_t *decoded = jpeg_alloc_decoder_mem(LUMINARY_DECODE_BYTES, &output_config, &decoded_capacity);
     ESP_ERROR_CHECK(input && decoded && decoded_capacity >= LUMINARY_DECODE_BYTES ? ESP_OK : ESP_ERR_NO_MEM);
+    if (input_capacity < minimum_input_capacity) {
+        ESP_LOGW(TAG, "JPEG input capacity %zu is below %zu; wave-cycle decode may fall back",
+                 input_capacity, minimum_input_capacity);
+    }
 
     jpeg_decoder_handle_t decoder = NULL;
     const jpeg_decode_engine_cfg_t engine_config = {.timeout_ms = 60};
@@ -1493,6 +1979,11 @@ void app_main(void)
     ESP_ERROR_CHECK(jpeg_decoder_process(decoder, &decode_config, input, asset_size,
                                          decoded, decoded_capacity, &decoded_size));
     ESP_ERROR_CHECK(decoded_size >= LUMINARY_FRAME_BYTES ? ESP_OK : ESP_ERR_INVALID_SIZE);
+    uint8_t *base_decoded = heap_caps_malloc(LUMINARY_FRAME_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!base_decoded) {
+        ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
+    }
+    memcpy(base_decoded, decoded, LUMINARY_FRAME_BYTES);
     initialize_wave_lut();
     if (wifi_events && CONFIG_LUMINARY_RUNTIME_BASE_URL[0] != '\0') {
         ESP_ERROR_CHECK(xTaskCreate(runtime_pull_task, "runtime-pull", 16384, NULL, 3, NULL) == pdPASS ?
@@ -1514,6 +2005,9 @@ void app_main(void)
         const uint64_t elapsed_ms = (uint64_t)(esp_timer_get_time() - started_us) / 1000ULL;
         const int64_t render_started_us = esp_timer_get_time();
         const time_t wall_clock = time(NULL);
+        const uint8_t *cycle_base = base_decoded;
+        bool use_wave_cycle = false;
+        size_t cycle_bytes = 0U;
         xSemaphoreTake(runtime_lock, portMAX_DELAY);
         if (wall_clock - last_solar_update >= 30 && update_solar_position_from_clock(wall_clock)) {
             last_solar_update = wall_clock;
@@ -1522,12 +2016,41 @@ void app_main(void)
                      runtime_state.sun_relative_azimuth_deci_deg / 10.0,
                      visible_star_count);
         }
+        if (runtime_wave_cycle.payload && runtime_wave_cycle.frame_count > 0U &&
+            runtime_wave_cycle.fps_milli > 0U) {
+            const uint32_t frame_index =
+                (uint32_t)(elapsed_ms * (uint64_t)runtime_wave_cycle.fps_milli / 1000ULL %
+                           runtime_wave_cycle.frame_count);
+            const lumv_frame_t *frame = runtime_wave_cycle.frames + frame_index;
+            if (frame->length > 0U && frame->length <= input_capacity) {
+                memcpy(input, runtime_wave_cycle.payload + frame->offset, frame->length);
+                cycle_bytes = frame->length;
+                use_wave_cycle = true;
+            }
+        }
         const bool cloudy = runtime_state.cloud_cover_permille > 0U;
+        if (use_wave_cycle) {
+            uint32_t decoded_size = 0U;
+            if (jpeg_decoder_process(decoder, &decode_config, input, cycle_bytes,
+                                    decoded, decoded_capacity, &decoded_size) != ESP_OK ||
+                decoded_size < LUMINARY_FRAME_BYTES) {
+                use_wave_cycle = false;
+                ESP_LOGW(TAG, "wave cycle frame decode failed; falling back to static base");
+            } else {
+                cycle_base = decoded;
+            }
+        }
+        xSemaphoreGive(runtime_lock);
         // Compose in cacheable PSRAM. The DPI scanout buffers are optimized
         // for DMA rather than random CPU writes, so touch each only once with
         // a contiguous transfer after the frame is complete.
-        render_runtime_frame(render_buffer, decoded, elapsed_ms);
-        memcpy(framebuffer[target], render_buffer, LUMINARY_FRAME_BYTES);
+        // Compose straight into the inactive scanout buffer. The old path
+        // composed into render_buffer and then copied 1.84 MB across, costing
+        // ~46 ms/frame purely to move bytes between two PSRAM regions.
+        render_runtime_frame(framebuffer[target], cycle_base, elapsed_ms, use_wave_cycle);
+        xSemaphoreTake(runtime_lock, portMAX_DELAY);
+        PROF_STAMP(prof_fb0);
+        PROF_SET(prof_fbcopy_us, prof_fb0);
         current_framebuffer = framebuffer[target];
         xSemaphoreGive(runtime_lock);
         const int64_t render_us = esp_timer_get_time() - render_started_us;
@@ -1540,6 +2063,14 @@ void app_main(void)
         if (rendered_frames <= 3U || (rendered_frames % 30U) == 0U) {
             ESP_LOGI(TAG, "runtime cadence: render=%lld us, uptime=%llu ms",
                      (long long)render_us, (unsigned long long)elapsed_ms);
+#if CONFIG_LUMINARY_RENDER_PROFILING
+            ESP_LOGI(TAG, "  phase us: basecopy=%lld lut=%lld wave=%lld sky=%lld "
+                          "water=%lld stars=%lld fbcopy=%lld cloud=%u/1000",
+                     (long long)prof_basecopy_us, (long long)prof_lut_us,
+                     (long long)prof_wave_us, (long long)prof_sky_us,
+                     (long long)prof_water_us, (long long)prof_stars_us,
+                     (long long)prof_fbcopy_us, runtime_state.cloud_cover_permille);
+#endif
         }
         // Clear ocean motion sustains 6 fps. Three independently projected
         // satellite shells measure ~284 ms/frame, so cloudy scenes use 3 fps
