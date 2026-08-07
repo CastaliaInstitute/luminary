@@ -12,6 +12,7 @@ target_add_binary_data(${COMPONENT_LIB} "../assets/runtime/nubble_runtime_water_
 target_add_binary_data(${COMPONENT_LIB} "../assets/runtime/nubble_runtime_shore_distance.bin" BINARY)
 target_add_binary_data(${COMPONENT_LIB} "../assets/runtime/nubble_runtime_ocean_phase.bin" BINARY)
 target_add_binary_data(${COMPONENT_LIB} "../assets/runtime/nubble_runtime_ocean_depth.bin" BINARY)
+target_add_binary_data(${COMPONENT_LIB} "../assets/runtime/nubble_runtime_ocean_map.bin" BINARY)
 target_add_binary_data(${COMPONENT_LIB} "../assets/runtime/nubble_runtime_cloud_low.bin" BINARY)
 target_add_binary_data(${COMPONENT_LIB} "../assets/runtime/nubble_runtime_cloud_mid.bin" BINARY)
 target_add_binary_data(${COMPONENT_LIB} "../assets/runtime/nubble_runtime_cloud_high.bin" BINARY)

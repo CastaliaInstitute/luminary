@@ -102,9 +102,20 @@ extern const uint8_t nubble_runtime_cloud_mid_bin_start[] asm("_binary_nubble_ru
 extern const uint8_t nubble_runtime_cloud_high_bin_start[] asm("_binary_nubble_runtime_cloud_high_bin_start");
 
 static const char *TAG = "luminary-anim";
-static int8_t wave_sine[256];
+/* Read only while building the per-frame wave tables (about a thousand reads
+ * a frame), so it lives in PSRAM: internal RAM here is what decides whether
+ * the firmware boots. This image boot-loops in ESP-Hosted startup once static
+ * DIRAM passes roughly 133 KB. */
+static int8_t *wave_sine;
 static int8_t wave_shade_row[LUMINARY_WIDTH / 2U];
 static uint8_t wave_breaker_phase_row[LUMINARY_WIDTH / 2U];
+#if CONFIG_LUMINARY_OCEAN_SIM
+/* Per-cell foam from the shallow-water solver, 0..254; 255 means "no solver
+ * data here, use the analytic crest heuristic". Read per water pixel, so it
+ * must be internal RAM -- but from the heap at renderer start, not .bss:
+ * the static image sits against the boot DIRAM ceiling. */
+static uint8_t *wave_foam_row;
+#endif
 
 /* Per-phase render profiling, off by default. Each phase of the frame is
  * timed and reported alongside the cadence log, which is how the render budget
@@ -135,7 +146,9 @@ static int64_t prof_basecopy_us, prof_lut_us, prof_wave_us,
  * Folding the copy into the per-row work is the promising direction instead. */
 static uint8_t wave_color_lut[3][16][256];
 static uint8_t cloud_x_lut[LUMINARY_WIDTH];
-static uint8_t cloud_y_lut[LUMINARY_RUNTIME_HORIZON];
+/* Three reads per sky row against one per pixel for cloud_x_lut: the row
+ * table can afford PSRAM, the column table cannot. */
+static uint8_t *cloud_y_lut;
 
 typedef struct {
     uint8_t *atlas; /* Interleaved luminance, alpha. */
@@ -407,6 +420,16 @@ static bool update_solar_position_from_clock(time_t now)
 
 static void initialize_wave_lut(void)
 {
+    wave_sine = heap_caps_malloc(256, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    cloud_y_lut = heap_caps_malloc(LUMINARY_RUNTIME_HORIZON,
+                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    ESP_ERROR_CHECK(wave_sine && cloud_y_lut ? ESP_OK : ESP_ERR_NO_MEM);
+#if CONFIG_LUMINARY_OCEAN_SIM
+    wave_foam_row = heap_caps_malloc(LUMINARY_WIDTH / 2U,
+                                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    ESP_ERROR_CHECK(wave_foam_row ? ESP_OK : ESP_ERR_NO_MEM);
+    memset(wave_foam_row, 255, LUMINARY_WIDTH / 2U);
+#endif
     for (unsigned index = 0; index < 256; ++index) {
         wave_sine[index] = (int8_t)lrintf(127.0f * sinf((float)index * 6.28318530718f / 256.0f));
     }
@@ -1460,6 +1483,7 @@ static void overlay_real_stars(uint8_t *destination, const int shift_x[3], const
 
 #if CONFIG_LUMINARY_OCEAN_SIM
 extern const uint8_t nubble_runtime_ocean_depth_bin_start[] asm("_binary_nubble_runtime_ocean_depth_bin_start");
+extern const uint8_t nubble_runtime_ocean_map_bin_start[] asm("_binary_nubble_runtime_ocean_map_bin_start");
 
 /* Shallow-water solver state. Every grid buffer lives in PSRAM: h, vel, depth,
  * normal and foam total 192 KB, and the internal heap has nowhere near that
@@ -1473,6 +1497,26 @@ extern const uint8_t nubble_runtime_ocean_depth_bin_start[] asm("_binary_nubble_
 static ocean_sim_t *ocean_sim;
 static SemaphoreHandle_t ocean_lock;
 static bool ocean_ready;
+
+/* Screen-to-solver map: one uint16 solver cell index per half-resolution
+ * panel cell, rows 290..599, built offline by scripts/build-ocean-screen-map.py
+ * from the fitted sea-plane projection. 0xFFFF marks cells the solver domain
+ * does not cover (the far field near the horizon); those keep the analytic
+ * sine-phase path. Copied to PSRAM at start: the render loop reads it once
+ * per cell and flash-mapped rodata would contend with instruction fetch. */
+#define OCEAN_MAP_ROW0 145u
+#define OCEAN_MAP_ROWS 155u
+#define OCEAN_MAP_NONE 0xFFFFu
+/* Q8.8 solver-grid coordinates per half-res cell: x alongshore, y offshore.
+ * y == 0xFFFF marks a cell outside the solver domain. */
+typedef struct { uint16_t x_q8, y_q8; } ocean_map_entry_t;
+static const ocean_map_entry_t *ocean_map;
+
+/* The render task samples a coherent copy of the solver's normal and foam
+ * fields, taken under the lock once per frame. Reading the live fields would
+ * tear whenever a 30 Hz step lands inside a 5 Hz frame. */
+static int8_t *ocean_normal_snapshot;
+static uint8_t *ocean_foam_snapshot;
 static int64_t ocean_step_us;      /* cost of the last step */
 static int64_t ocean_step_peak_us; /* worst step since the last report */
 static uint32_t ocean_steps;
@@ -1493,20 +1537,35 @@ static bool ocean_sim_start(void)
                                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     uint8_t *foam = heap_caps_malloc(OCEAN_CELLS,
                                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!h || !vel || !depth || !normal || !foam) {
+    uint16_t *damp_residual = heap_caps_malloc(OCEAN_CELLS * sizeof(uint16_t),
+                                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!h || !vel || !depth || !normal || !foam || !damp_residual) {
         ESP_LOGE(TAG, "ocean solver: PSRAM allocation failed");
         return false;
     }
     memcpy(depth, nubble_runtime_ocean_depth_bin_start, OCEAN_CELLS);
     ocean_sim = heap_caps_malloc(sizeof(*ocean_sim),
                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!ocean_sim) {
+    ocean_map_entry_t *map_copy =
+        heap_caps_malloc(OCEAN_MAP_ROWS * (LUMINARY_WIDTH / 2U) *
+                         sizeof(ocean_map_entry_t),
+                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    ocean_normal_snapshot = heap_caps_malloc(2u * OCEAN_CELLS,
+                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    ocean_foam_snapshot = heap_caps_malloc(OCEAN_CELLS,
+                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!ocean_sim || !map_copy || !ocean_normal_snapshot || !ocean_foam_snapshot) {
         ESP_LOGE(TAG, "ocean solver: PSRAM allocation failed");
         return false;
     }
+    memcpy(map_copy, nubble_runtime_ocean_map_bin_start,
+           OCEAN_MAP_ROWS * (LUMINARY_WIDTH / 2U) * sizeof(ocean_map_entry_t));
+    ocean_map = map_copy;
+    memset(ocean_normal_snapshot, 0, 2u * OCEAN_CELLS);
+    memset(ocean_foam_snapshot, 0, OCEAN_CELLS);
     ocean_lock = xSemaphoreCreateMutex();
     if (!ocean_lock) return false;
-    ocean_sim_bind(ocean_sim, h, vel, depth, normal, foam);
+    ocean_sim_bind(ocean_sim, h, vel, depth, normal, foam, damp_residual);
     ocean_sim_prepare(ocean_sim, OCEAN_SIM_DX_MM,
                       1000u / CONFIG_LUMINARY_OCEAN_SIM_HZ, OCEAN_SIM_DAMPING);
     ocean_sim_reset_surface(ocean_sim);
@@ -1551,6 +1610,19 @@ static void ocean_sim_task(void *argument)
         xSemaphoreGive(ocean_lock);
 
         if ((++ocean_steps % (CONFIG_LUMINARY_OCEAN_SIM_HZ * 10u)) == 0u) {
+            int normal_peak = 0;
+            unsigned foam_peak = 0, breaking = 0;
+            for (size_t i = 0; i < OCEAN_CELLS; ++i) {
+                const int gy = ocean_sim->normal[2u * i + 1u];
+                const int magnitude = gy < 0 ? -gy : gy;
+                if (magnitude > normal_peak) normal_peak = magnitude;
+                if (ocean_sim->foam[i]) {
+                    ++breaking;
+                    if (ocean_sim->foam[i] > foam_peak) foam_peak = ocean_sim->foam[i];
+                }
+            }
+            ESP_LOGI(TAG, "ocean solver: |dh/dy| peak=%d foam peak=%u breaking=%u cells",
+                     normal_peak, foam_peak, breaking);
             /* A step must fit inside the tick to hold real time. */
             ESP_LOGI(TAG, "ocean solver: step=%lld us peak=%lld us budget=%u us "
                           "(%u steps, %.1f s simulated)",
@@ -1612,6 +1684,76 @@ static void build_wave_component_luts(const uint16_t *time_phase_q8, const int *
         wave_crest_lut[stored] = (int8_t)wave_sine_q8(argument & 0xFFFFU);
     }
 }
+
+#if CONFIG_LUMINARY_OCEAN_SIM
+// Wave row fed by the shallow-water solver. Each half-res cell samples the
+// solver cell the fitted projection says it looks at: shade from the offshore
+// surface gradient (the same quantity the analytic path derives from its
+// sine), foam from depth-limited breaking. Cells outside the solver domain
+// fall back to the analytic tables, which the caller has already built.
+__attribute__((noinline)) IRAM_ATTR
+static void compute_wave_row_sim(const uint8_t *phase_src, int shade_recip_q16,
+                                 unsigned map_row)
+{
+    const ocean_map_entry_t *map = ocean_map + (size_t)map_row * (LUMINARY_WIDTH / 2U);
+    const int8_t *normals = ocean_normal_snapshot;
+    const uint8_t *foam = ocean_foam_snapshot;
+    for (unsigned phase_x = 0; phase_x < OCEAN_PHASE_WIDTH;
+         ++phase_x, phase_src += OCEAN_PHASE_COMPONENTS) {
+        const unsigned gx_q8 = map[phase_x].x_q8;
+        const unsigned gy_q8 = map[phase_x].y_q8;
+        if (gy_q8 == OCEAN_MAP_NONE) {
+            const uint8_t dominant = phase_src[0];
+            const int normal_light = wave_component_lut[0][dominant] +
+                                     wave_component_lut[1][phase_src[1]] +
+                                     wave_component_lut[2][phase_src[2]];
+            int shade = normal_light * shade_recip_q16 >> 16;
+            if (shade < -32) shade = -32;
+            if (shade > 31) shade = 31;
+            wave_shade_row[phase_x] = (int8_t)shade;
+            wave_breaker_phase_row[phase_x] = dominant;
+            wave_foam_row[phase_x] = 255u;
+            continue;
+        }
+        /* Bilinear sample of the solver fields. Nearest-cell sampling drew
+         * the 2 m world grid on the screen as hard-edged blocks; in the near
+         * field one solver cell spans tens of pixels and the frame-to-frame
+         * shade steps read as a flickering checkerboard. */
+        const unsigned cx = gx_q8 >> 8, cy = gy_q8 >> 8;
+        const int fx = (int)(gx_q8 & 0xFFu), fy = (int)(gy_q8 & 0xFFu);
+        const size_t cell00 = (size_t)cy * OCEAN_NX + cx;
+        const size_t cell10 = cell00 + OCEAN_NX;
+
+        const int n00 = normals[2u * cell00 + 1u];
+        const int n01 = normals[2u * (cell00 + 1u) + 1u];
+        const int n10 = normals[2u * cell10 + 1u];
+        const int n11 = normals[2u * (cell10 + 1u) + 1u];
+        const int top = n00 + ((n01 - n00) * fx >> 8);
+        const int bottom = n10 + ((n11 - n10) * fx >> 8);
+        const int gradient = top + ((bottom - top) * fy >> 8);
+
+        /* The analytic shade is the surface gradient along the propagation
+         * direction, which travels shoreward: -dh/dy in solver axes. The x6
+         * gain is calibrated to the mild end of the live conditions: a 0.5 m
+         * diffracted swell shows gradients of only a few units, and mapping
+         * those to nothing left the sea visibly frozen. Steeper surf clamps,
+         * which is what a shading LUT wants anyway. */
+        int shade = -gradient * 6;
+        if (shade < -32) shade = -32;
+        if (shade > 31) shade = 31;
+        wave_shade_row[phase_x] = (int8_t)shade;
+        wave_breaker_phase_row[phase_x] = 0u;
+
+        const int f00 = foam[cell00], f01 = foam[cell00 + 1u];
+        const int f10 = foam[cell10], f11 = foam[cell10 + 1u];
+        const int foam_top = f00 + ((f01 - f00) * fx >> 8);
+        const int foam_bottom = f10 + ((f11 - f10) * fx >> 8);
+        int breaking = foam_top + ((foam_bottom - foam_top) * fy >> 8);
+        if (breaking > 254) breaking = 254;
+        wave_foam_row[phase_x] = (uint8_t)breaking;
+    }
+}
+#endif /* CONFIG_LUMINARY_OCEAN_SIM */
 
 // Kept out of line and in IRAM deliberately. render_runtime_frame is inlined
 // into its caller, so an IRAM_ATTR there placed nothing -- an earlier
@@ -1797,9 +1939,25 @@ static void render_water_row(uint8_t *row, unsigned y, unsigned water_warmth)
         bgr[1] = wave_color_lut[1][shade_index][bgr[1]];
         bgr[2] = wave_color_lut[2][shade_index][bgr[2]];
 
+#if CONFIG_LUMINARY_OCEAN_SIM
+        // Solver foam: depth-limited breaking measured on the bathymetry,
+        // already shaped in space by the shoaling surf. 255 = no solver data.
+        const unsigned sim_foam = wave_foam_row[phase_x];
+        if (sim_foam != 255u) {
+            if (sim_foam > 0u) {
+                const unsigned bounded_foam = sim_foam > 240u ? 240u : sim_foam;
+                for (unsigned channel = 0; channel < 3U; ++channel) {
+                    const unsigned value = bgr[channel];
+                    bgr[channel] = (uint8_t)(value +
+                        ((255U - value) * bounded_foam >> 8));
+                }
+            }
+        } else
+#endif
         // Shore distance is zero at physical rock. The phase bends over the
         // final pixels so an incoming crest steepens and rises into foam at
         // that exact boundary, never over land.
+        {
         const uint8_t shore = nubble_runtime_shore_distance_bin_start[pixel];
         if (shore < 36U) {
             // wave_breaker_phase_row holds the stored surface phase, untouched
@@ -1815,6 +1973,7 @@ static void render_water_row(uint8_t *row, unsigned y, unsigned water_warmth)
                     bgr[channel] = (uint8_t)(value + ((255U - value) * bounded_foam >> 8));
                 }
             }
+        }
         }
         if (water_warmth > 0U) {
             bgr[0] = (uint8_t)((bgr[0] * (255U - glow) + 68U * glow) / 255U);
@@ -1949,6 +2108,18 @@ static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint
     // the wave_shade_row writes do not alias runtime_state, so it reloads this
     // pointer on every component of every cell otherwise.
     const uint8_t *const ocean_phase = runtime_state.ocean_phase;
+#if CONFIG_LUMINARY_OCEAN_SIM
+    bool sim_frame = false;
+    if (ocean_lock && ocean_ready) {
+        // One coherent copy of the solver output per frame; the 30 Hz solver
+        // keeps stepping while this 72 KB copy and the frame render run.
+        xSemaphoreTake(ocean_lock, portMAX_DELAY);
+        memcpy(ocean_normal_snapshot, ocean_sim->normal, 2u * OCEAN_CELLS);
+        memcpy(ocean_foam_snapshot, ocean_sim->foam, OCEAN_CELLS);
+        xSemaphoreGive(ocean_lock);
+        sim_frame = true;
+    }
+#endif
     for (unsigned y = 0; y < LUMINARY_HEIGHT; ++y) {
         // Fold the base image copy into the row pass. The same 1.84 MB moves,
         // but each row is still hot in cache when it is processed, instead of
@@ -1971,7 +2142,17 @@ static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint
                                      OCEAN_PHASE_COMPONENTS;
             const int shade_recip_q16 = total_wave_weight > 0 ?
                                          65536 / (total_wave_weight * 4) : 0;
+#if CONFIG_LUMINARY_OCEAN_SIM
+            if (sim_frame) {
+                compute_wave_row_sim(ocean_phase + phase_row, shade_recip_q16,
+                                     (y >> 1U) - OCEAN_MAP_ROW0);
+            } else {
+                memset(wave_foam_row, 255, LUMINARY_WIDTH / 2U);
+                compute_wave_row(ocean_phase + phase_row, shade_recip_q16);
+            }
+#else
             compute_wave_row(ocean_phase + phase_row, shade_recip_q16);
+#endif
         }
         PROF_STAMP(prof_r0);
         PROF_ADD(prof_wave_us, prof_w0, prof_r0);

@@ -67,7 +67,13 @@ menu "Luminary Ocean"
     config LUMINARY_OCEAN_SIM_HZ
         int "Solver step rate in Hz"
         depends on LUMINARY_OCEAN_SIM
-        default 30
+        default 20
         range 1 60
+        help
+            Measured on the P4 at the 192x192 domain: a step costs 29-33 ms,
+            which misses a 33 ms tick, and 20 Hz leaves 40% of the core idle.
+            The renderer samples the surface at 6 fps, so anything above
+            ~12 Hz looks identical. The scheme stays CFL-stable to 50 ms
+            ticks at the full 30 m depth range.
 
 endmenu
