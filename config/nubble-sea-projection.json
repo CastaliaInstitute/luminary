@@ -1,0 +1,33 @@
+{
+  "$schema": "https://luminary.castalia.institute/schemas/sea-projection-v1.json",
+  "method": "fit of a pinhole sea-plane projection to the island waterline in the runtime water mask against the NOAA CUDEM shoreline; see scripts/fit-sea-plane-projection.py",
+  "anchor_light_latlon": [
+    43.1653,
+    -70.5911
+  ],
+  "camera": {
+    "east_m": -152.72,
+    "north_m": -39.94,
+    "height_m": 3.37,
+    "latlon": [
+      43.164941,
+      -70.592981
+    ],
+    "focal_px": 848.3,
+    "vfov_deg": 38.95,
+    "yaw_deg": 83.171,
+    "pitch_deg_down": 0.5741
+  },
+  "panel": {
+    "width_px": 1024,
+    "height_px": 600,
+    "horizon_y_px": 291
+  },
+  "water_level_navd88_m": 0.0,
+  "fit": {
+    "cost": 5.963,
+    "waterline_residual_median_m": 4.0,
+    "waterline_residual_p90_m": 8.25,
+    "water_on_land_fraction": 0.0
+  }
+}
