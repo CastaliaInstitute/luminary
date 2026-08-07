@@ -1,0 +1,42 @@
+{
+  "schema": "luminary-animation-manifest/v1",
+  "asset": {
+    "path": "nubble_debug_reference_clouds_water_v1.lumv",
+    "format": "LUMV",
+    "version": 1,
+    "frame_count": 24,
+    "fps_milli": 6000
+  },
+  "canvas": {
+    "width": 1024,
+    "height": 600,
+    "horizon_y_px": 291,
+    "camera": "locked",
+    "vertical_motion": "forbidden"
+  },
+  "content": {
+    "land": "none"
+  },
+  "live_conditions": {
+    "location": {
+      "name": "York",
+      "latitude": 43.1637,
+      "longitude": -70.648
+    },
+    "nws": {
+      "hourly": "https://api.weather.gov/gridpoints/GYX/64,33/forecast/hourly",
+      "preferred_observation": "KPSM"
+    },
+    "tide_proxy": {
+      "provider": "CO-OPS",
+      "name": "Wells ME",
+      "station_id": "8419317"
+    },
+    "wave_proxy": {
+      "provider": "NDBC",
+      "station_id": "44098",
+      "replaces": "44005",
+      "status": "recovered/unavailable"
+    }
+  }
+}

@@ -1,6 +1,6 @@
 {
   "schema": "luminary-runtime-scene/v1",
-  "updated_at": "2026-08-05T03:16:44.066556Z",
+  "updated_at": "2026-08-06T01:52:30.096463Z",
   "camera": {
     "width_px": 1024,
     "height_px": 600,
@@ -11,12 +11,12 @@
   },
   "sky": {
     "palette_rgb": [
-      58,
-      69,
-      71
+      60,
+      72,
+      73
     ],
     "observed_cloud_fraction": 0.0,
-    "visibility_confidence": 1.0,
+    "visibility_confidence": 0.818,
     "shells": [
       {
         "name": "low",
@@ -25,13 +25,13 @@
           3250.0
         ],
         "projection_height_m": 2000.0,
-        "wind_from_deg": 198.15,
-        "wind_speed_mps": 5.8955,
+        "wind_from_deg": 251.09,
+        "wind_speed_mps": 5.5766,
         "advection": {
-          "east_mps": 1.8365,
-          "north_mps": 5.6022
+          "east_mps": 5.2756,
+          "north_mps": 1.8073
         },
-        "wind_source": "GOES Derived Motion Winds (9 quality vectors)",
+        "wind_source": "GOES Derived Motion Winds (39 quality vectors)",
         "texture": "cloud-low-latest.png"
       },
       {
@@ -41,13 +41,13 @@
           6500.0
         ],
         "projection_height_m": 5000.0,
-        "wind_from_deg": 216.02,
-        "wind_speed_mps": 5.9984,
+        "wind_from_deg": 255.43,
+        "wind_speed_mps": 7.1045,
         "advection": {
-          "east_mps": 3.5275,
-          "north_mps": 4.8516
+          "east_mps": 6.876,
+          "north_mps": 1.7872
         },
-        "wind_source": "GOES Derived Motion Winds (1 quality vectors)",
+        "wind_source": "GOES Derived Motion Winds (14 quality vectors)",
         "texture": "cloud-mid-latest.png"
       },
       {
@@ -57,13 +57,13 @@
           21000.0
         ],
         "projection_height_m": 10000.0,
-        "wind_from_deg": 262.67,
-        "wind_speed_mps": 19.5746,
+        "wind_from_deg": 258.31,
+        "wind_speed_mps": 21.7404,
         "advection": {
-          "east_mps": 19.4146,
-          "north_mps": 2.4974
+          "east_mps": 21.2895,
+          "north_mps": 4.405
         },
-        "wind_source": "GOES Derived Motion Winds (206 quality vectors)",
+        "wind_source": "GOES Derived Motion Winds (192 quality vectors)",
         "texture": "cloud-high-latest.png"
       }
     ],
@@ -75,10 +75,10 @@
     ]
   },
   "ocean": {
-    "significant_wave_height_m": 0.8,
+    "significant_wave_height_m": 0.5,
     "dominant_period_s": 7.0,
     "dominant_wavelength_m": 76.478,
-    "wave_from_deg": 144.0,
+    "wave_from_deg": 137.0,
     "phase_velocity_mps": 10.925,
     "components": [
       {
@@ -86,36 +86,36 @@
         "height_m": 0.1,
         "period_s": 10.0,
         "wavelength_m": 156.078,
-        "wave_from_deg": 135.0,
+        "wave_from_deg": 112.5,
         "source": "NDBC 44098 spectral partition observation"
       },
       {
         "name": "wind_wave",
-        "height_m": 0.8,
-        "period_s": 8.3,
-        "wavelength_m": 107.522,
+        "height_m": 0.5,
+        "period_s": 8.0,
+        "wavelength_m": 99.89,
         "wave_from_deg": 135.0,
         "source": "NDBC 44098 spectral partition observation"
       }
     ],
-    "wind_from_deg": 200,
-    "wind_knots": 10.5,
-    "tide_phase": "flooding",
+    "wind_from_deg": 210,
+    "wind_knots": 14.7,
+    "tide_phase": "ebbing",
     "shore_interaction": "registered water mask + signed shore distance; foam only on incoming faces",
     "advance": "continuous spectral phase; no finite loop"
   },
   "sun": {
-    "altitude_deg": -26.3,
-    "azimuth_deg": 335.4,
+    "altitude_deg": -17.8,
+    "azimuth_deg": 315.7,
     "off_screen": true,
     "state": "night",
     "visual_phase": "night"
   },
   "moon": {
-    "altitude_deg": 7.4,
-    "azimuth_deg": 75.1,
-    "illumination": 0.604,
-    "visible": true
+    "altitude_deg": -10.2,
+    "azimuth_deg": 48.4,
+    "illumination": 0.495,
+    "visible": false
   },
   "sources": {
     "conditions": "/Users/danielmcshan/Documents/Codex/2026-07-25/create-a-castaliainstitute-project-repo-for/tmp/york-live/display-state.json",

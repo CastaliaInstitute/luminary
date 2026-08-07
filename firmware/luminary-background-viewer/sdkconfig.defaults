@@ -16,3 +16,13 @@ CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+
+# Renderer performance depends on these; pin them so a fresh checkout
+# reproduces the measured frame budget rather than inheriting target defaults.
+# The Waveshare 7B carries 32 MB of hex-mode PSRAM at 200 MHz, and the render
+# loop was tuned against a 128 KB L2 cache with 64-byte lines.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_CACHE_L2_CACHE_128KB=y
+CONFIG_CACHE_L2_CACHE_LINE_64B=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y

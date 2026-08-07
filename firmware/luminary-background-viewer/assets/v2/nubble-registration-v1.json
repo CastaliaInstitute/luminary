@@ -1,0 +1,6 @@
+{
+  "canvas": {"width": 1024, "height": 600},
+  "horizon_transition_y": 291,
+  "definition": "The strongest sky-to-water horizontal transition in scenes/nubble-aligned/compiled/background-cropped.png.",
+  "invariant": "Every production animation frame must retain this horizon on pixel row 291. The packer rejects non-1024x600 frames and horizon drift beyond two pixels. No vertical crop, scale, or camera motion is allowed."
+}

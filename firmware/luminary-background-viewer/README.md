@@ -14,7 +14,7 @@ Production ESP-IDF firmware for the **Waveshare ESP32-P4-WIFI6-Touch-LCD-7B** on
 
 ## Runtime model
 
-The base image is decoded once by the P4 JPEG engine. At 6 fps, firmware then:
+The base image is decoded once by the P4 JPEG engine. At 10 fps, firmware then:
 
 1. Projects NDBC's measured swell and wind-wave partitions onto a horizontal world-space sea plane.
 2. Animates surface normals and reflections without translating source pixels, then steepens incoming crests into foam only inside the registered shoreline-distance field.
@@ -109,6 +109,6 @@ idf.py -B build-runtime build
 idf.py -B build-runtime -p /dev/cu.wchusbserial5B901846451 flash monitor
 ```
 
-Only use a serial path after positively identifying this exact P4 board. The current application is about 2.73 MB, leaving roughly 13% of the 3 MB app partition free. Firmware uses 6 fps when clear and 3 fps when cloud shells are visible; confirm both modes against the serial frame-time measurements after changing the renderer.
+Only use a serial path after positively identifying this exact P4 board. The current application is about 2.71 MB, leaving roughly 14% of the 3 MB app partition free. The renderer runs on a dedicated task whose stack lives in internal SRAM — a PSRAM or RTC-RAM stack slows every stack access enough to stretch one frame into seconds. The composed sky (clouds, solar grading, moon, stars) is cached in double-buffered PSRAM, rebuilt a few rows per frame when wind or solar state moves it, and blitted only when a framebuffer does not already carry it, so clear and cloudy scenes both hold 10 fps (~96 ms measured under full overcast). Confirm against the serial `runtime cadence` measurements after changing the renderer.
 
 Legacy `.lumv` assets remain under `assets/v2` for comparison, but the production firmware no longer loops finite JPEG sequences.
