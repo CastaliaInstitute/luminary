@@ -2051,6 +2051,14 @@ static void render_sky_row(uint8_t *row, unsigned y, const int shift_x[3],
 // (not IRAM placement, not divisions, not the row copy, not an explicit
 // prefetch of the displacement window). This shape is the one that
 // measures fast; do not "clean it up" without the cycle counter running.
+//
+// noinline + IRAM is load-bearing, recorded here for the THIRD time: this
+// attribute line was silently lost in a refactor splice and the pass ran
+// inlined from flash for hours, costing anywhere from 63 to 940 ms in
+// layout-and-contention roulette that got misattributed to sea state,
+// copies, and pacing in turn. If this function is missing from the ELF
+// symbol table, that is the bug.
+__attribute__((noinline)) IRAM_ATTR
 static void render_water_row(uint8_t *row, const uint8_t *base, unsigned y,
                              unsigned water_warmth)
 {

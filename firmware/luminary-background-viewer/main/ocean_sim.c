@@ -449,5 +449,15 @@ OCEAN_SIM_HOT void ocean_sim_step(ocean_sim_t *sim)
 
     apply_mur(sim, h);
 
-    refresh_normals_and_foam(sim);
+    /* The normal and foam fields exist for the renderer, which samples them
+     * at a few frames per second; they do not need the physics rate. This
+     * pass is also two thirds of the step's external-memory traffic
+     * (normals and foam alone stream 147 KB), and on the P4 that traffic is
+     * what starves the render core: the water pass measured 78 ms against a
+     * flat sea and up to 940 ms in a storm purely because heavier seas
+     * lengthen the solver's PSRAM residency. Half-rate refresh halves the
+     * solver's footprint on the shared memory system. */
+    if ((sim->tick & 1u) == 0u) {
+        refresh_normals_and_foam(sim);
+    }
 }
