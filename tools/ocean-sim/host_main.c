@@ -22,6 +22,7 @@ static int16_t g_vel[OCEAN_CELLS];
 static uint8_t g_depth[OCEAN_CELLS];
 static int8_t  g_normal[2 * OCEAN_CELLS];
 static uint8_t g_foam[OCEAN_CELLS];
+static uint16_t g_damp_residual[OCEAN_CELLS];
 
 /* Placeholder bathymetry: a curved shoreline at low y, a linear depth ramp out
  * to 30 m, and a rock stack offshore. Real bathymetry must come from the scene
@@ -187,7 +188,7 @@ int main(int argc, char **argv)
 
     ocean_sim_t sim;
     build_depth();
-    ocean_sim_bind(&sim, g_h, g_vel, g_depth, g_normal, g_foam);
+    ocean_sim_bind(&sim, g_h, g_vel, g_depth, g_normal, g_foam, g_damp_residual);
     ocean_sim_prepare(&sim, dx_mm, tick_ms, 0.9995);
     sim.source_gain_q16 = (uint32_t)(gain * 65536.0);
     sim.absorb_shore = g_freefield;

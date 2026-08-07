@@ -22,18 +22,32 @@ static inline int32_t shift_to_zero(int32_t v, unsigned bits)
     return v >= 0 ? (v >> bits) : -((-v) >> bits);
 }
 
-/* Fixed-point multiply with the same symmetric rounding. Every signed shift in
- * the hot path needs this: rounding toward negative infinity injects a bias of
- * up to one unit per operation, and applied per cell per step that integrates
- * into a metres-deep drift. */
+/* Fixed-point multiply, rounded to nearest with symmetric handling of sign.
+ * Truncating toward zero here is not neutral: the error is always opposed to
+ * the signal, which acts as amplitude-proportional damping applied per cell
+ * per step. Measured on the flat deep test domain, truncation attenuated a
+ * propagating swell to 27% over 48 cells; rounding to nearest makes the error
+ * zero-mean and the same wave arrives at full height. Rounding toward
+ * negative infinity is no better: that bias rectifies into a metres-deep
+ * mean-level drift. */
 static inline int32_t mul_shift(int32_t a, int32_t b, unsigned bits)
 {
     const int64_t p = (int64_t)a * (int64_t)b;
-    return (int32_t)(p >= 0 ? (p >> bits) : -((-p) >> bits));
+    const int64_t half = (int64_t)1 << (bits - 1u);
+    return (int32_t)(p >= 0 ? ((p + half) >> bits) : -(((-p) + half) >> bits));
+}
+
+/* Round-to-nearest shift for the height update. See mul_shift: truncation
+ * here was the other half of the systematic propagation loss. */
+static inline int32_t round_shift(int32_t v, unsigned bits)
+{
+    const int32_t half = 1 << (bits - 1u);
+    return v >= 0 ? ((v + half) >> bits) : -(((-v) + half) >> bits);
 }
 
 void ocean_sim_bind(ocean_sim_t *sim, int16_t *h, int16_t *vel,
-                    uint8_t *depth, int8_t *normal, uint8_t *foam)
+                    uint8_t *depth, int8_t *normal, uint8_t *foam,
+                    uint16_t *damp_residual)
 {
     memset(sim, 0, sizeof(*sim));
     sim->h = h;
@@ -41,6 +55,7 @@ void ocean_sim_bind(ocean_sim_t *sim, int16_t *h, int16_t *vel,
     sim->depth = depth;
     sim->normal = normal;
     sim->foam = foam;
+    sim->damp_residual = damp_residual;
     sim->normal_shift = 4;
     sim->shore_normal_deg = 90;
 }
@@ -185,6 +200,7 @@ void ocean_sim_reset_surface(ocean_sim_t *sim)
     memset(sim->vel, 0, OCEAN_CELLS * sizeof(int16_t));
     memset(sim->normal, 0, 2u * OCEAN_CELLS * sizeof(int8_t));
     memset(sim->foam, 0, OCEAN_CELLS);
+    memset(sim->damp_residual, 0, OCEAN_CELLS * sizeof(uint16_t));
     sim->tick = 0u;
 }
 
@@ -276,13 +292,20 @@ OCEAN_SIM_HOT static void refresh_normals_and_foam(ocean_sim_t *sim)
              * with the criterion actual surf obeys. */
             const int32_t crest = h[i];
             const int32_t threshold = sim->break_h[depth[i]];
+            /* Foam decays instead of vanishing: cells near the breaking
+             * threshold flip in and out on successive steps, and on the
+             * panel each solver cell is tens of pixels wide, so binary foam
+             * reads as flashing blocks. An eighth per step gives white water
+             * a roughly one-second tail, which is also what surf does. */
+            const int32_t faded = (int32_t)sim->foam[i] - ((sim->foam[i] + 7u) >> 3);
             if (crest > threshold && threshold > 0) {
                 const int32_t excess = crest - threshold;
                 const int32_t steep = (gx < 0 ? -gx : gx) + (gy < 0 ? -gy : gy);
                 int32_t value = (excess * (64 + steep)) >> 9;
+                if (value < faded) value = faded;
                 sim->foam[i] = (uint8_t)clamp_i32(value, 0, 255);
             } else {
-                sim->foam[i] = 0u;
+                sim->foam[i] = (uint8_t)faded;
             }
         }
     }
@@ -369,11 +392,26 @@ OCEAN_SIM_HOT void ocean_sim_step(ocean_sim_t *sim)
             }
 
             int32_t v = (int32_t)vel[i] + accel;
-            v = mul_shift(v, (int32_t)cell_damp, 16);
+            /* Exact damping via error feedback: floor the product and carry
+             * the 16-bit remainder into the next step. See damp_residual. */
+            {
+                const int64_t product = (int64_t)v * (int64_t)cell_damp +
+                                        (int64_t)sim->damp_residual[i];
+                v = (int32_t)(product >> 16);
+                sim->damp_residual[i] = (uint16_t)(product - ((int64_t)v << 16));
+            }
             v = clamp_i32(v, -32768, 32767);
             vel[i] = (int16_t)v;
 
-            int32_t next = centre + shift_to_zero(v, OCEAN_VEL_EXTRA_BITS);
+            int32_t next = centre + round_shift(v, OCEAN_VEL_EXTRA_BITS);
+            /* Grid-scale filter. The discrete stencil's two-cell checkerboard
+             * mode is physically meaningless and nothing above damps it: with
+             * rounded arithmetic it accumulates without bound (measured: the
+             * mean grid-scale residual grew monotonically 1 -> 12 over 6000
+             * steps and was still climbing). One part in 512 of the already
+             * computed Laplacian removes it with a ~64-step half-life while
+             * costing a 7 s swell about 1e-4 of its amplitude per step. */
+            next += round_shift(lap, 9);
             /* Velocity damping leaves a static offset as a fixed point, so
              * bleed the height slowly to stop DC accumulating. */
             next -= shift_to_zero(next, 14);

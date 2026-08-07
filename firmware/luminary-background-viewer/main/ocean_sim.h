@@ -31,10 +31,17 @@
 #endif
 #endif
 
-/* Grid sized so h + h_prev + depth stay inside the P4's 128 KB L2 cache:
- * 49152 + 49152 + 24576 = 122880 bytes. */
+/* 384 x 384 m at 2 m cells. The offshore extent is load-bearing: the TF/SF
+ * interface sits 16 rows in from the seaward edge, and the incident wave is
+ * only injected cleanly if that row lies in open deep water. A 128-row domain
+ * put the interface in 1-3 m of intertidal shelf with the island crossing the
+ * injection row, and the swell scattered and died within twenty cells --
+ * measured 0 wave energy in the whole visible channel. At 192 rows the
+ * interface sits in ~11 m of water east of the island and the domain fills.
+ * The cost is the hot working set no longer fitting the P4's 128 KB L2
+ * (h + h_prev + depth is now 184 KB). */
 #define OCEAN_NX 192u
-#define OCEAN_NY 128u
+#define OCEAN_NY 192u
 #define OCEAN_CELLS (OCEAN_NX * OCEAN_NY)
 
 /* Surface elevation is Q4.11: +/-16 m range, 1/2048 m (0.49 mm) resolution. */
@@ -76,6 +83,14 @@ typedef struct {
 
 typedef struct {
     int16_t *h;        /* OCEAN_CELLS, Q4.11, current surface */
+    /* Damping error-feedback: the low 16 bits of last step's v*damp product.
+     * Rounding the damp multiply to nearest lets small velocities survive it
+     * unchanged forever (0.9995*v rounds back to v below |v|~1000), which
+     * integrates into metre-scale static tilts; truncating instead eats one
+     * unit per step and silences the weak diffracted waves the sheltered
+     * channel lives on. Carrying the exact remainder forward gives the true
+     * decay rate at every amplitude with no bias in either direction. */
+    uint16_t *damp_residual;
     /* Velocity carries OCEAN_VEL_EXTRA_BITS more fractional bits than h. A
      * well-resolved wave has a tiny integer Laplacian -- at ~68 cells per
      * wavelength and 0.85 m amplitude it is about 15 units, so c^2*lap lands
@@ -152,7 +167,8 @@ typedef struct {
  * MALLOC_CAP_SPIRAM after boot -- never static arrays, the internal heap has
  * no room. */
 void ocean_sim_bind(ocean_sim_t *sim, int16_t *h, int16_t *vel,
-                    uint8_t *depth, int8_t *normal, uint8_t *foam);
+                    uint8_t *depth, int8_t *normal, uint8_t *foam,
+                    uint16_t *damp_residual);
 
 /* Build the celerity LUT, damping profile and sine table. Call after the
  * depth field is populated and before set_components. Uses floating point but

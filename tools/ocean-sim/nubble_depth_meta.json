@@ -1,28 +1,28 @@
 {
   "grid": [
     192,
-    128
+    192
   ],
   "dx_m": 2.0,
   "domain_m": [
     384.0,
-    256.0
+    384.0
   ],
   "anchor_light_latlon": [
     43.1653,
     -70.5911
   ],
   "offsets_m": [
-    -60.0,
+    -160.0,
     -192.0
   ],
   "depth_max_mm": 30000,
-  "water_level_navd88_m": 0.0,
-  "land_cells": 5656,
-  "water_cells": 18920,
+  "water_level_navd88_m": 1.0,
+  "land_cells": 5898,
+  "water_cells": 30966,
   "depth_range_m": [
-    0.02,
-    16.45
+    0.0,
+    19.58
   ],
   "source": "NOAA NCEI CUDEM 1/9 arc-second ncei19_n43x25_w070x75_2021v1 (measured)",
   "horizontal_datum": "NAD83",

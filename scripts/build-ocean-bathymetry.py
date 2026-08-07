@@ -40,7 +40,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CUDEM = ROOT / "data/nubble/ncei19_n43x25_w070x75_2021v1.tif"
 
 # Solver grid, matching ocean_sim.h.
-NX, NY = 192, 128
+NX, NY = 192, 192
 DEPTH_MAX_MM = 30000
 
 # Domain is anchored on Cape Neddick (Nubble) Light, a verifiable landmark.
