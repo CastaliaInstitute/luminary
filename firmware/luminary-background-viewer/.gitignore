@@ -5,3 +5,5 @@ build*/
 
 # Component downloads are locked by dependencies.lock and restored by idf.py.
 managed_components/
+sdkconfig.wifi-backup
+sdkconfig.old

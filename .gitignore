@@ -19,3 +19,14 @@ tmp/
 
 # Logs
 *.log
+
+# Raw NOAA source rasters for the bathymetry build. These are large public
+# downloads (the CUDEM tile alone is 151 MB, past GitHub's file limit) and are
+# reproducible from the identifiers documented in
+# scripts/build-ocean-bathymetry.py. The derived depth grid is committed under
+# tools/ocean-sim/ instead.
+data/nubble/*.tif
+data/nubble/*.bag
+
+# Host build of the ocean solver
+tools/ocean-sim/ocean-sim
