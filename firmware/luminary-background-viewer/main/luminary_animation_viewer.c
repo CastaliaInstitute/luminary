@@ -102,13 +102,36 @@ extern const uint8_t nubble_runtime_cloud_mid_bin_start[] asm("_binary_nubble_ru
 extern const uint8_t nubble_runtime_cloud_high_bin_start[] asm("_binary_nubble_runtime_cloud_high_bin_start");
 
 static const char *TAG = "luminary-anim";
+/* PSRAM copies of the two per-pixel lookup assets the water pass reads. The
+ * embedded originals live in flash, and per-pixel flash data reads from the
+ * IRAM row loops go through the flash cache path -- the same one that made
+ * flash-resident code catastrophically slow here. PSRAM reads share the
+ * ordinary data cache with everything else the pass touches. */
+static const uint8_t *water_mask_ram;
+static const uint8_t *shore_distance_ram;
 /* Read only while building the per-frame wave tables (about a thousand reads
  * a frame), so it lives in PSRAM: internal RAM here is what decides whether
  * the firmware boots. This image boot-loops in ESP-Hosted startup once static
  * DIRAM passes roughly 133 KB. */
 static int8_t *wave_sine;
-static int8_t wave_shade_row[LUMINARY_WIDTH / 2U];
-static uint8_t wave_breaker_phase_row[LUMINARY_WIDTH / 2U];
+/* Hot per-pixel row tables: internal RAM for speed, but from the heap at
+ * renderer start rather than .bss -- the static image sits against the
+ * ~133 KB DIRAM ceiling where ESP-Hosted startup boot-loops. */
+static int8_t *wave_shade_row;
+static uint8_t *wave_breaker_phase_row;
+/* Three cloud shells composed into one screen-space layer, per half-res
+ * column: transmission of the stack and the premultiplied colour it adds.
+ * Turns three per-pixel alpha blends across 291 rows into one -- the shells
+ * only vary at atlas resolution (256 texels across 1024 pixels), so nothing
+ * visible is lost at half-column granularity. Internal heap, allocated after
+ * the boot-critical window like the other row scratch. */
+static uint8_t *cloud_row_trans;
+static uint8_t *cloud_row_add; /* interleaved b, g, r per half-res column */
+/* 4x4 ordered dither for the shade quantisation, 0..15. Read once per water
+ * pixel from an IRAM loop, so it must be RAM: written at renderer start
+ * precisely so the compiler cannot const-promote it into flash rodata --
+ * which it did to the initialised version of this table. */
+static uint8_t shade_dither[4][4];
 #if CONFIG_LUMINARY_OCEAN_SIM
 /* Per-cell foam from the shallow-water solver, 0..254; 255 means "no solver
  * data here, use the analytic crest heuristic". Read per water pixel, so it
@@ -150,8 +173,16 @@ static int64_t prof_basecopy_us, prof_lut_us, prof_wave_us,
  * at 47.0 ms against 45.9 ms for plain memcpy. The transfer is bandwidth
  * bound, not CPU bound, so DMA buys nothing and costs an ISR round trip.
  * Folding the copy into the per-row work is the promising direction instead. */
-static uint8_t wave_color_lut[3][16][256];
-static uint8_t cloud_x_lut[LUMINARY_WIDTH];
+/* 12 KB, the largest single static object this firmware had. Internal heap
+ * at renderer start instead of .bss: same DRAM, same speed, but it no longer
+ * counts against the boot-time DIRAM ceiling that ESP-Hosted startup
+ * enforces. Indexed as [channel][shade][source]. */
+typedef uint8_t wave_color_lut_t[3][16][256];
+static wave_color_lut_t *wave_color_lut_mem;
+#define wave_color_lut (*wave_color_lut_mem)
+/* PSRAM: read three times per quarter-res column by the cloud compose, not
+ * per pixel. Freed 1 KB of the internal budget for the IRAM row loop. */
+static uint8_t *cloud_x_lut;
 /* Three reads per sky row against one per pixel for cloud_x_lut: the row
  * table can afford PSRAM, the column table cannot. */
 static uint8_t *cloud_y_lut;
@@ -426,10 +457,25 @@ static bool update_solar_position_from_clock(time_t now)
 
 static void initialize_wave_lut(void)
 {
+    wave_color_lut_mem = heap_caps_malloc(sizeof(wave_color_lut_t),
+                                          MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    ESP_ERROR_CHECK(wave_color_lut_mem ? ESP_OK : ESP_ERR_NO_MEM);
+    cloud_x_lut = heap_caps_malloc(LUMINARY_WIDTH, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    ESP_ERROR_CHECK(cloud_x_lut ? ESP_OK : ESP_ERR_NO_MEM);
     wave_sine = heap_caps_malloc(256, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     cloud_y_lut = heap_caps_malloc(LUMINARY_RUNTIME_HORIZON,
                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     ESP_ERROR_CHECK(wave_sine && cloud_y_lut ? ESP_OK : ESP_ERR_NO_MEM);
+    wave_shade_row = heap_caps_malloc(LUMINARY_WIDTH / 2U,
+                                      MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    wave_breaker_phase_row = heap_caps_malloc(LUMINARY_WIDTH / 2U,
+                                              MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    ESP_ERROR_CHECK(wave_shade_row && wave_breaker_phase_row ? ESP_OK : ESP_ERR_NO_MEM);
+    cloud_row_trans = heap_caps_malloc(LUMINARY_WIDTH / 2U,
+                                       MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    cloud_row_add = heap_caps_malloc((LUMINARY_WIDTH / 2U) * 3U,
+                                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    ESP_ERROR_CHECK(cloud_row_trans && cloud_row_add ? ESP_OK : ESP_ERR_NO_MEM);
 #if CONFIG_LUMINARY_OCEAN_SIM
     wave_foam_row = heap_caps_malloc(LUMINARY_WIDTH / 2U,
                                      MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -443,6 +489,24 @@ static void initialize_wave_lut(void)
     memset(wave_dx_row, 0, LUMINARY_WIDTH / 2U);
     memset(wave_dy_row, 0, LUMINARY_WIDTH / 2U);
 #endif
+    {
+        static const uint8_t bayer[16] = {0, 8, 2, 10, 12, 4, 14, 6,
+                                          3, 11, 1, 9, 15, 7, 13, 5};
+        memcpy(shade_dither, bayer, sizeof(bayer));
+    }
+    {
+        uint8_t *mask = heap_caps_malloc(LUMINARY_WIDTH * LUMINARY_HEIGHT / 8U,
+                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        uint8_t *shore = heap_caps_malloc(LUMINARY_WIDTH * LUMINARY_HEIGHT,
+                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        ESP_ERROR_CHECK(mask && shore ? ESP_OK : ESP_ERR_NO_MEM);
+        memcpy(mask, nubble_runtime_water_mask_bin_start,
+               LUMINARY_WIDTH * LUMINARY_HEIGHT / 8U);
+        memcpy(shore, nubble_runtime_shore_distance_bin_start,
+               LUMINARY_WIDTH * LUMINARY_HEIGHT);
+        water_mask_ram = mask;
+        shore_distance_ram = shore;
+    }
     for (unsigned index = 0; index < 256; ++index) {
         wave_sine[index] = (int8_t)lrintf(127.0f * sinf((float)index * 6.28318530718f / 256.0f));
     }
@@ -1296,7 +1360,7 @@ static void runtime_pull_task(void *argument)
 
 static inline bool runtime_water_pixel(size_t pixel)
 {
-    return (nubble_runtime_water_mask_bin_start[pixel >> 3] >> (pixel & 7U)) & 1U;
+    return (water_mask_ram[pixel >> 3] >> (pixel & 7U)) & 1U;
 }
 
 static inline int wrap_cloud_x(int value)
@@ -1748,13 +1812,11 @@ static void compute_wave_row_sim(const uint8_t *phase_src, int shade_recip_q16,
         const int top = n00 + ((n01 - n00) * fx >> 8);
         const int bottom = n10 + ((n11 - n10) * fx >> 8);
         const int gradient = top + ((bottom - top) * fy >> 8);
-        const int x00 = normals[2u * cell00];
-        const int x01 = normals[2u * (cell00 + 1u)];
-        const int x10 = normals[2u * cell10];
-        const int x11 = normals[2u * (cell10 + 1u)];
-        const int x_top = x00 + ((x01 - x00) * fx >> 8);
-        const int x_bottom = x10 + ((x11 - x10) * fx >> 8);
-        const int gradient_x = x_top + ((x_bottom - x_top) * fy >> 8);
+        /* The alongshore gradient only steers a coarse pixel displacement
+         * that is then clamped and distance-tapered; a nearest tap is
+         * indistinguishable from bilinear there and saves four PSRAM reads
+         * per cell (measured as part of a 37 ms wave phase). */
+        const int gradient_x = normals[2u * cell00];
 
         /* The analytic shade is the surface gradient along the propagation
          * direction, which travels shoreward: -dh/dy in solver axes. Carried
@@ -1779,9 +1841,13 @@ static void compute_wave_row_sim(const uint8_t *phase_src, int shade_recip_q16,
         int dx = gradient_x * 2;
         if (dx < -7) dx = -7;
         if (dx > 7) dx = 7;
-        int dy = -gradient;
-        if (dy < -3) dy = -3;
-        if (dy > 3) dy = 3;
+        /* Bounded to one row: dy sets how many framebuffer rows the
+         * refraction reads span, which is what couples render cost to sea
+         * state. The horizontal shift stays in-row and carries most of the
+         * refraction feel. */
+        int dy = -gradient / 4;
+        if (dy < -1) dy = -1;
+        if (dy > 1) dy = 1;
         wave_dx_row[phase_x] = (int8_t)dx;
         wave_dy_row[phase_x] = (int8_t)dy;
 
@@ -1844,6 +1910,21 @@ static void render_sky_row(uint8_t *row, unsigned y, const int shift_x[3],
         // Feather the bottom 22 rows so no shell can create a false horizon.
         const unsigned clearance = LUMINARY_RUNTIME_HORIZON - y;
         const unsigned feather = clearance < 22U ? clearance : 22U;
+        // Compose the three shells once per QUARTER-res column into a single
+        // transmission plus premultiplied colour, then blend each pixel once.
+        // The shells only vary at atlas resolution -- 256 texels across 1024
+        // pixels -- so quarter-column granularity loses nothing visible, and
+        // it replaces three per-pixel alpha blends with one.
+        //
+        // Shell-outer, column-inner is load-bearing: the pixel-outer form
+        // with per-iteration shell indexing through stack arrays measured
+        // 1.2M cycles per row against 13k for the blend loop below -- the
+        // same order-of-magnitude collapse as the abandoned fused-sky
+        // experiment. Each shell pass here walks its atlas row and the
+        // compose rows sequentially. Measured: the whole composed sky is
+        // 3.4x cheaper per overcast frame than the three per-pixel passes.
+        memset(cloud_row_trans, 255, LUMINARY_WIDTH / 4U);
+        memset(cloud_row_add, 0, (LUMINARY_WIDTH / 4U) * 3U);
         for (unsigned shell = 0; shell < 3U; ++shell) {
             const cloud_shell_t *const shell_state = &runtime_state.shells[shell];
             // The atlas row depends only on y and this frame's wind offset.
@@ -1853,21 +1934,34 @@ static void render_sky_row(uint8_t *row, unsigned y, const int shift_x[3],
             const unsigned bias = shell_state->blue_bias;
             const unsigned half_bias = bias / 2U;
             const int offset_x = shift_x[shell];
-            uint8_t *bgr = row;
-            for (unsigned x = 0; x < LUMINARY_WIDTH; ++x, bgr += LUMINARY_BPP) {
-                const unsigned atlas_x =
-                    (unsigned)wrap_cloud_x((int)cloud_x_lut[x] + offset_x);
+            const uint8_t *const column_lut = cloud_x_lut;
+            for (unsigned quarter = 0; quarter < LUMINARY_WIDTH / 4U; ++quarter) {
+                const unsigned atlas_x = (unsigned)wrap_cloud_x(
+                    (int)column_lut[quarter * 4U] + offset_x);
                 const uint8_t *const texel = atlas_row + (size_t)atlas_x * 2U;
-                const unsigned luminance = texel[0];
                 unsigned alpha = texel[1] * cloud_cover_permille / 1000U;
                 alpha = alpha * feather / 22U;
                 if (alpha == 0U) continue;
+                const unsigned luminance = texel[0];
                 const unsigned cloud_g = luminance > half_bias ? luminance - half_bias : 0U;
                 const unsigned cloud_r = luminance > bias ? luminance - bias : 0U;
-                bgr[0] = (uint8_t)((bgr[0] * (255U - alpha) + luminance * alpha) / 255U);
-                bgr[1] = (uint8_t)((bgr[1] * (255U - alpha) + cloud_g * alpha) / 255U);
-                bgr[2] = (uint8_t)((bgr[2] * (255U - alpha) + cloud_r * alpha) / 255U);
+                const unsigned keep = 255U - alpha;
+                uint8_t *const add = cloud_row_add + (size_t)quarter * 3U;
+                add[0] = (uint8_t)((add[0] * keep + luminance * alpha) / 255U);
+                add[1] = (uint8_t)((add[1] * keep + cloud_g * alpha) / 255U);
+                add[2] = (uint8_t)((add[2] * keep + cloud_r * alpha) / 255U);
+                cloud_row_trans[quarter] = (uint8_t)(cloud_row_trans[quarter] * keep / 255U);
             }
+        }
+        uint8_t *bgr = row;
+        for (unsigned x = 0; x < LUMINARY_WIDTH; ++x, bgr += LUMINARY_BPP) {
+            const unsigned quarter = x >> 2U;
+            const unsigned trans = cloud_row_trans[quarter];
+            if (trans == 255U) continue;
+            const uint8_t *const add = cloud_row_add + (size_t)quarter * 3U;
+            bgr[0] = (uint8_t)(bgr[0] * trans / 255U + add[0]);
+            bgr[1] = (uint8_t)(bgr[1] * trans / 255U + add[1]);
+            bgr[2] = (uint8_t)(bgr[2] * trans / 255U + add[2]);
         }
     }
 
@@ -1950,26 +2044,28 @@ static void render_sky_row(uint8_t *row, unsigned y, const int shift_x[3],
     }
 }
 
-/* 4x4 ordered dither for the shade quantisation, 0..15. Deliberately in
- * .data rather than flash rodata: it is read once per water pixel from an
- * IRAM loop. Sixteen bytes of DRAM is the whole cost. */
-static uint8_t shade_dither[4][4] = {
-    {0, 8, 2, 10},
-    {12, 4, 14, 6},
-    {3, 11, 1, 9},
-    {15, 7, 13, 5},
-};
-
-// The water rows get the same treatment as the sky rows, for the same reason:
-// out of line so IRAM_ATTR applies, and with every per-row constant hoisted so
-// the inner loop makes no calls into flash. grade_water_pixel used to be
-// invoked per pixel and re-derived the solar warmth on each call.
-__attribute__((noinline)) IRAM_ATTR
+// Pixel-outer with per-pixel cell lookups, deliberately. A cell-outer
+// restructure sharing the LUT rows, displacement and foam across each
+// two-pixel cell read 6x SLOWER on target (74k -> 400k cycles per row)
+// with byte-identical memory streams; the cause was never pinned down
+// (not IRAM placement, not divisions, not the row copy, not an explicit
+// prefetch of the displacement window). This shape is the one that
+// measures fast; do not "clean it up" without the cycle counter running.
 static void render_water_row(uint8_t *row, const uint8_t *base, unsigned y,
                              unsigned water_warmth)
 {
     const size_t row_pixel = (size_t)y * LUMINARY_WIDTH;
     const unsigned sun_mode = runtime_state.sun_mode;
+    /* Hoisted: the LUT lives behind a static pointer now, and the byte
+     * writes below alias everything, so without this local the compiler
+     * reloads that pointer for every one of the three lookups per pixel. */
+    const wave_color_lut_t *const colour = (const wave_color_lut_t *)wave_color_lut_mem;
+#if CONFIG_LUMINARY_OCEAN_SIM
+    /* Row constant; recomputing it per pixel put a division inside the
+     * hottest loop in the renderer. */
+    const int reach = (int)(y - LUMINARY_RUNTIME_HORIZON);
+    const int taper_q8 = reach >= 160 ? 256 : reach * 256 / 160;
+#endif
     unsigned glow = 0U;
     if (water_warmth > 0U) {
         const unsigned distance = y - LUMINARY_RUNTIME_HORIZON;
@@ -2000,8 +2096,6 @@ static void render_water_row(uint8_t *row, const uint8_t *base, unsigned y,
         // shift up near the horizon would correspond to a world-space shift
         // of tens of metres, and the far field visibly sheared.
         {
-            const int reach = (int)(y - LUMINARY_RUNTIME_HORIZON);
-            const int taper_q8 = reach >= 160 ? 256 : reach * 256 / 160;
             int sx = (int)x + (wave_dx_row[phase_x] * taper_q8 >> 8);
             if (sx < 0) sx = 0;
             if (sx >= (int)LUMINARY_WIDTH) sx = (int)LUMINARY_WIDTH - 1;
@@ -2010,14 +2104,14 @@ static void render_water_row(uint8_t *row, const uint8_t *base, unsigned y,
             if (sy >= (int)LUMINARY_HEIGHT) sy = (int)LUMINARY_HEIGHT - 1;
             const uint8_t *source = base +
                 ((size_t)sy * LUMINARY_WIDTH + (size_t)sx) * LUMINARY_BPP;
-            bgr[0] = wave_color_lut[0][shade_index][source[0]];
-            bgr[1] = wave_color_lut[1][shade_index][source[1]];
-            bgr[2] = wave_color_lut[2][shade_index][source[2]];
+            bgr[0] = (*colour)[0][shade_index][source[0]];
+            bgr[1] = (*colour)[1][shade_index][source[1]];
+            bgr[2] = (*colour)[2][shade_index][source[2]];
         }
 #else
-        bgr[0] = wave_color_lut[0][shade_index][bgr[0]];
-        bgr[1] = wave_color_lut[1][shade_index][bgr[1]];
-        bgr[2] = wave_color_lut[2][shade_index][bgr[2]];
+        bgr[0] = (*colour)[0][shade_index][bgr[0]];
+        bgr[1] = (*colour)[1][shade_index][bgr[1]];
+        bgr[2] = (*colour)[2][shade_index][bgr[2]];
 #endif
 
 #if CONFIG_LUMINARY_OCEAN_SIM
@@ -2039,7 +2133,7 @@ static void render_water_row(uint8_t *row, const uint8_t *base, unsigned y,
         // final pixels so an incoming crest steepens and rises into foam at
         // that exact boundary, never over land.
         {
-        const uint8_t shore = nubble_runtime_shore_distance_bin_start[pixel];
+        const uint8_t shore = shore_distance_ram[pixel];
         if (shore < 36U) {
             // wave_breaker_phase_row holds the stored surface phase, untouched
             // by time; wave_crest_lut carries this frame's Q8.8 advance, so the
@@ -2073,11 +2167,16 @@ static void render_water_row(uint8_t *row, const uint8_t *base, unsigned y,
     }
 }
 
-// Measured: putting this whole function in IRAM changed nothing (376.5 ms
-// before and after), so it stays in flash rather than spending scarce
-// internal RAM. The wave-field cost is not instruction fetch.
+// The row-loop skeleton runs 600 times a frame and was the last per-row code
+// executing from flash. That made frame time hostage to link-layout luck:
+// the same binary measured 209 ms with profiling compiled in and 310 ms
+// without, in the same conditions minutes apart, because unrelated code
+// shifts moved this loop across flash-cache lines. (An earlier note here
+// claimed IRAM placement changed nothing -- that experiment silently tested
+// nothing, because the function was inlined into app_main and IRAM_ATTR
+// never applied. noinline is load-bearing.)
 static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint64_t elapsed_ms,
-                                bool cycle_base)
+                                bool cycle_base, bool water_rows_hold_base)
 {
     // Start from the authored frame in one DMA-friendly copy. Per-pixel
     // three-byte memcpy calls were dominating render time on the P4.
@@ -2130,7 +2229,17 @@ static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint
 
     // Reflection and night grading depend only on the source channel and the
     // 16 quantized normal values. Build the result once per frame instead of
-    // performing six multiplies for every water pixel in PSRAM.
+    // performing six multiplies for every water pixel in PSRAM -- and only
+    // when an input actually changed: the table depends on the sky colour
+    // and sun mode, which move on 30-second solar updates, not per frame.
+    // Rebuilding every frame cost a steady 4 ms.
+    static uint32_t colour_lut_key = 0xFFFFFFFFu;
+    const uint32_t colour_key = ((uint32_t)runtime_state.sky_b << 24) |
+                                ((uint32_t)runtime_state.sky_g << 16) |
+                                ((uint32_t)runtime_state.sky_r << 8) |
+                                runtime_state.sun_mode;
+    if (colour_key != colour_lut_key) {
+        colour_lut_key = colour_key;
     for (unsigned channel = 0; channel < 3U; ++channel) {
         for (unsigned shade_index = 0; shade_index < 16U; ++shade_index) {
             const int shade = -30 + (int)shade_index * 4;
@@ -2151,6 +2260,7 @@ static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint
                 wave_color_lut[channel][shade_index][source] = (uint8_t)value;
             }
         }
+    }
     }
     const unsigned cloud_cover_permille = runtime_state.cloud_cover_permille;
     const unsigned component_count = runtime_state.wave_component_count > 0U ?
@@ -2214,7 +2324,28 @@ static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint
         // either way, and memcpy moves it at ~75 MB/s where scattered
         // three-byte accesses inside the pixel loops move it slower.
         PROF_STAMP(prof_c0);
+        // A third DMA attempt on this copy, third rejection, all measured:
+        // synchronous DMA lost to memcpy outright (47.0 vs 45.9 ms), and
+        // row-pipelined AXI GDMA -- issue row y+1 while shading row y --
+        // cost 830 ms in completion waits while its bus traffic slowed every
+        // other phase (sky 33 -> 56 ms, water 63 -> 84 ms). The engine also
+        // cannot be primed further ahead without the driver's per-row cache
+        // maintenance costs growing to match. Plain memcpy stays.
+#if CONFIG_LUMINARY_OCEAN_SIM
+        // Below the horizon the copy serves only the printed-rock pixels:
+        // the refracting water pass rewrites every water pixel straight from
+        // the authored frame, and the base is decoded exactly once, so a
+        // framebuffer that has been through one static frame already holds
+        // the right rock bytes. Measured with the pixel-outer water pass:
+        // skipping saves 26 ms of copy for a 15 ms slowdown of the displaced
+        // refraction reads the copy was accidentally prefetching.
+        if (y < LUMINARY_RUNTIME_HORIZON || !(sim_frame && water_rows_hold_base)) {
+            memcpy(destination + (size_t)y * row_bytes, base + (size_t)y * row_bytes,
+                   row_bytes);
+        }
+#else
         memcpy(destination + (size_t)y * row_bytes, base + (size_t)y * row_bytes, row_bytes);
+#endif
         PROF_STAMP(prof_w0);
         PROF_ADD(prof_basecopy_us, prof_c0, prof_w0);
         if (y >= LUMINARY_RUNTIME_HORIZON &&
@@ -2399,8 +2530,20 @@ void app_main(void)
                      runtime_state.sun_relative_azimuth_deci_deg / 10.0,
                      visible_star_count);
         }
-        if (runtime_wave_cycle.payload && runtime_wave_cycle.frame_count > 0U &&
-            runtime_wave_cycle.fps_milli > 0U) {
+        bool want_wave_cycle = runtime_wave_cycle.payload &&
+                               runtime_wave_cycle.frame_count > 0U &&
+                               runtime_wave_cycle.fps_milli > 0U;
+#if CONFIG_LUMINARY_OCEAN_SIM
+        // The baked wave-cycle loop and the live solver are the same idea at
+        // different eras: the cycle plays authored JPEG frames of moving
+        // water, the solver moves the water itself. Rendering both would
+        // double-animate the sea -- refraction would read a base that is
+        // already waving -- and the cycle path renders through the old
+        // per-pixel branch at ~330 ms/frame besides. Once the solver is
+        // running it wins, and the cycle's decode cost is skipped too.
+        if (ocean_ready) want_wave_cycle = false;
+#endif
+        if (want_wave_cycle) {
             const uint32_t frame_index =
                 (uint32_t)(elapsed_ms * (uint64_t)runtime_wave_cycle.fps_milli / 1000ULL %
                            runtime_wave_cycle.frame_count);
@@ -2430,7 +2573,13 @@ void app_main(void)
         // Compose straight into the inactive scanout buffer. The old path
         // composed into render_buffer and then copied 1.84 MB across, costing
         // ~46 ms/frame purely to move bytes between two PSRAM regions.
-        render_runtime_frame(framebuffer[target], cycle_base, elapsed_ms, use_wave_cycle);
+        // A framebuffer's rock pixels below the horizon are valid from the
+        // moment it has rendered one frame of the static base; a wave-cycle
+        // frame overwrites them with that cycle frame, invalidating it.
+        static bool fb_water_rows_hold_base[2] = {false, false};
+        render_runtime_frame(framebuffer[target], cycle_base, elapsed_ms, use_wave_cycle,
+                             fb_water_rows_hold_base[target]);
+        fb_water_rows_hold_base[target] = !use_wave_cycle;
         xSemaphoreTake(runtime_lock, portMAX_DELAY);
         PROF_STAMP(prof_fb0);
         PROF_SET(prof_fbcopy_us, prof_fb0);
