@@ -47,3 +47,27 @@ menu "Luminary Renderer"
             for production builds.
 
 endmenu
+
+menu "Luminary Ocean"
+
+    config LUMINARY_OCEAN_SIM
+        bool "Drive the sea from the shallow-water solver"
+        default n
+        help
+            Run the fixed-point shallow-water solver on the idle core and
+            drive the sea surface from it, instead of from the analytic
+            sine-phase field. Shoaling, refraction and breaking then emerge
+            from the measured bathymetry rather than being authored.
+
+            Leave this off unless you are working on the solver. The sine
+            phase path is the shipping renderer, and the solver still needs
+            a screen-to-world mapping before it can register with the
+            printed relief.
+
+    config LUMINARY_OCEAN_SIM_HZ
+        int "Solver step rate in Hz"
+        depends on LUMINARY_OCEAN_SIM
+        default 30
+        range 1 60
+
+endmenu

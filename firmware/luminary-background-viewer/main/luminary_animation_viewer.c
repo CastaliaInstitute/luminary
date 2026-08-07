@@ -46,6 +46,7 @@
 #include "nvs_flash.h"
 #include "sdmmc_cmd.h"
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
+#include "ocean_sim.h"
 #include "luminary_runtime_state.h"
 #include "hipparcos_stars.h"
 
@@ -1457,6 +1458,112 @@ static void overlay_real_stars(uint8_t *destination, const int shift_x[3], const
     }
 }
 
+#if CONFIG_LUMINARY_OCEAN_SIM
+extern const uint8_t nubble_runtime_ocean_depth_bin_start[] asm("_binary_nubble_runtime_ocean_depth_bin_start");
+
+/* Shallow-water solver state. Every grid buffer lives in PSRAM: h, vel, depth,
+ * normal and foam total 192 KB, and the internal heap has nowhere near that
+ * spare -- adding 1.7 KB of IRAM was already enough to fail an allocation
+ * during ESP-Hosted startup. The solver's own working set (h + vel + depth) is
+ * sized to stay inside the 128 KB L2 cache as it streams through. */
+/* The solver struct is ~5.7 KB of LUTs and row scratch. That is small next to
+ * the grids but not next to the internal heap: this firmware boot-loops in
+ * ESP-Hosted startup once DIRAM passes roughly 133 KB, so it goes to PSRAM
+ * too. Its lookup tables are 256 entries each and stay resident in L2. */
+static ocean_sim_t *ocean_sim;
+static SemaphoreHandle_t ocean_lock;
+static bool ocean_ready;
+static int64_t ocean_step_us;      /* cost of the last step */
+static int64_t ocean_step_peak_us; /* worst step since the last report */
+static uint32_t ocean_steps;
+
+/* Bathymetry is 2 m cells; ocean_sim.h's default dx is for a smaller domain. */
+#define OCEAN_SIM_DX_MM 2000u
+#define OCEAN_SIM_DAMPING 0.9995
+
+static bool ocean_sim_start(void)
+{
+    int16_t *h = heap_caps_malloc(OCEAN_CELLS * sizeof(int16_t),
+                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    int16_t *vel = heap_caps_malloc(OCEAN_CELLS * sizeof(int16_t),
+                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *depth = heap_caps_malloc(OCEAN_CELLS,
+                                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    int8_t *normal = heap_caps_malloc(2u * OCEAN_CELLS,
+                                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *foam = heap_caps_malloc(OCEAN_CELLS,
+                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!h || !vel || !depth || !normal || !foam) {
+        ESP_LOGE(TAG, "ocean solver: PSRAM allocation failed");
+        return false;
+    }
+    memcpy(depth, nubble_runtime_ocean_depth_bin_start, OCEAN_CELLS);
+    ocean_sim = heap_caps_malloc(sizeof(*ocean_sim),
+                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!ocean_sim) {
+        ESP_LOGE(TAG, "ocean solver: PSRAM allocation failed");
+        return false;
+    }
+    ocean_lock = xSemaphoreCreateMutex();
+    if (!ocean_lock) return false;
+    ocean_sim_bind(ocean_sim, h, vel, depth, normal, foam);
+    ocean_sim_prepare(ocean_sim, OCEAN_SIM_DX_MM,
+                      1000u / CONFIG_LUMINARY_OCEAN_SIM_HZ, OCEAN_SIM_DAMPING);
+    ocean_sim_reset_surface(ocean_sim);
+    return true;
+}
+
+/* Push the live sea state into the solver. The renderer's wave components
+ * carry height and period; bearing comes from the scene's dominant direction
+ * until the runtime bundle carries a per-component bearing. */
+static void ocean_sim_apply_conditions_locked(void)
+{
+    ocean_component_t comp[3];
+    unsigned count = runtime_state.wave_component_count;
+    if (count > 3u) count = 3u;
+    for (unsigned i = 0; i < count; ++i) {
+        comp[i].period_ms = runtime_state.waves[i].period_ms;
+        comp[i].height_mm = runtime_state.waves[i].height_mm;
+        comp[i].from_deg = LUMINARY_WAVE_FROM_DEG;
+    }
+    if (count == 0u) {
+        comp[0].period_ms = LUMINARY_WAVE_PERIOD_MS;
+        comp[0].height_mm = LUMINARY_WAVE_HEIGHT_MM;
+        comp[0].from_deg = LUMINARY_WAVE_FROM_DEG;
+        count = 1u;
+    }
+    /* Nubble faces east, so the shore normal points out along +90 degrees --
+     * the same axis the bathymetry grid is built on. */
+    ocean_sim_set_components(ocean_sim, comp, count, 90);
+}
+
+static void ocean_sim_task(void *argument)
+{
+    const TickType_t period = pdMS_TO_TICKS(1000u / CONFIG_LUMINARY_OCEAN_SIM_HZ);
+    TickType_t deadline = xTaskGetTickCount();
+    while (true) {
+        xSemaphoreTake(ocean_lock, portMAX_DELAY);
+        const int64_t started = esp_timer_get_time();
+        ocean_sim_step(ocean_sim);
+        ocean_step_us = esp_timer_get_time() - started;
+        if (ocean_step_us > ocean_step_peak_us) ocean_step_peak_us = ocean_step_us;
+        ocean_ready = true;
+        xSemaphoreGive(ocean_lock);
+
+        if ((++ocean_steps % (CONFIG_LUMINARY_OCEAN_SIM_HZ * 10u)) == 0u) {
+            /* A step must fit inside the tick to hold real time. */
+            ESP_LOGI(TAG, "ocean solver: step=%lld us peak=%lld us budget=%u us "
+                          "(%u steps, %.1f s simulated)",
+                     (long long)ocean_step_us, (long long)ocean_step_peak_us,
+                     1000000u / CONFIG_LUMINARY_OCEAN_SIM_HZ, ocean_steps,
+                     (double)ocean_steps / CONFIG_LUMINARY_OCEAN_SIM_HZ);
+            ocean_step_peak_us = 0;
+        }
+        vTaskDelayUntil(&deadline, period);
+    }
+}
+#endif /* CONFIG_LUMINARY_OCEAN_SIM */
+
 // Sine of a Q8.8 phase, linearly interpolated between the two neighbouring
 // LUT entries. Only ever called while building the per-frame tables below, so
 // the interpolation costs 768 evaluations per frame rather than one per cell.
@@ -1992,6 +2099,20 @@ void app_main(void)
                  CONFIG_LUMINARY_RUNTIME_BASE_URL, CONFIG_LUMINARY_RUNTIME_POLL_SECONDS);
     }
 
+#if CONFIG_LUMINARY_OCEAN_SIM
+    if (ocean_sim_start()) {
+        xSemaphoreTake(runtime_lock, portMAX_DELAY);
+        ocean_sim_apply_conditions_locked();
+        xSemaphoreGive(runtime_lock);
+        // CPU1 runs this render loop, so the solver gets CPU0.
+        ESP_ERROR_CHECK(xTaskCreatePinnedToCore(ocean_sim_task, "ocean-sim", 4096,
+                                                NULL, 4, NULL, 0) == pdPASS ?
+                        ESP_OK : ESP_ERR_NO_MEM);
+        ESP_LOGI(TAG, "Ocean solver: %ux%u cells at %u Hz on CPU0, %u KB in PSRAM",
+                 OCEAN_NX, OCEAN_NY, CONFIG_LUMINARY_OCEAN_SIM_HZ,
+                 (unsigned)((OCEAN_CELLS * 6u) / 1024u));
+    }
+#endif
     TickType_t deadline = xTaskGetTickCount();
     uint8_t target = 0;
     uint32_t rendered_frames = 0;
