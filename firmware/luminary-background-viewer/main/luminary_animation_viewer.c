@@ -35,6 +35,7 @@
 #include "esp_ldo_regulator.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "driver/temperature_sensor.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
 #include "esp_vfs_fat.h"
@@ -2514,6 +2515,19 @@ void app_main(void)
                  (unsigned)((OCEAN_CELLS * 6u) / 1024u));
     }
 #endif
+    // Die temperature in the cadence log. Scattered-PSRAM phases measured
+    // 2-8x slower after a long hot day than on the same binary in the
+    // afternoon; the leading theory is temperature-compensated PSRAM
+    // refresh, and this reading is how that theory gets tested against a
+    // cold morning boot.
+    temperature_sensor_handle_t die_thermometer = NULL;
+    {
+        temperature_sensor_config_t thermometer_config =
+            TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
+        if (temperature_sensor_install(&thermometer_config, &die_thermometer) == ESP_OK) {
+            temperature_sensor_enable(die_thermometer);
+        }
+    }
     TickType_t deadline = xTaskGetTickCount();
     uint8_t target = 0;
     uint32_t rendered_frames = 0;
@@ -2601,8 +2615,13 @@ void app_main(void)
         target ^= 1U;
         ++rendered_frames;
         if (rendered_frames <= 3U || (rendered_frames % 30U) == 0U) {
-            ESP_LOGI(TAG, "runtime cadence: render=%lld us, uptime=%llu ms",
-                     (long long)render_us, (unsigned long long)elapsed_ms);
+            float die_celsius = -274.0f;
+            if (die_thermometer) {
+                temperature_sensor_get_celsius(die_thermometer, &die_celsius);
+            }
+            ESP_LOGI(TAG, "runtime cadence: render=%lld us, uptime=%llu ms, die=%.1f C",
+                     (long long)render_us, (unsigned long long)elapsed_ms,
+                     (double)die_celsius);
 #if CONFIG_LUMINARY_RENDER_PROFILING
             ESP_LOGI(TAG, "  phase us: basecopy=%lld lut=%lld wave=%lld sky=%lld "
                           "water=%lld stars=%lld fbcopy=%lld cloud=%u/1000",
