@@ -1,0 +1,130 @@
+package institute.castalia.luminary
+
+import android.content.res.AssetManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.view.Surface
+import org.json.JSONObject
+
+/** Kotlin face of the native core: asset loading, scene state, frame loop. */
+class LuminaryCore(private val assets: AssetManager) {
+
+    external fun nativeInit(
+        baseRgb: ByteArray, waterMask: ByteArray, shore: ByteArray,
+        map: ByteArray, depth: ByteArray,
+        cloudLow: ByteArray, cloudMid: ByteArray, cloudHigh: ByteArray,
+    ): Boolean
+
+    external fun nativeSetConditions(
+        skyR: Int, skyG: Int, skyB: Int, sunMode: Int,
+        sunAltDeci: Int, sunAzDeci: Int, cloudPermille: Int,
+        waveFields: IntArray, shellFields: IntArray,
+    )
+
+    external fun nativeSolverTick()
+    external fun nativeSetSurface(surface: Surface?)
+    external fun nativeRenderFrame(elapsedMs: Long): Boolean
+
+    fun initialize(): Boolean {
+        val ok = nativeInit(
+            decodeBaseRgb(),
+            read("nubble_runtime_water_mask.bin"),
+            read("nubble_runtime_shore_distance.bin"),
+            read("nubble_runtime_ocean_map.bin"),
+            read("nubble_runtime_ocean_depth.bin"),
+            read("nubble_runtime_cloud_low.bin"),
+            read("nubble_runtime_cloud_mid.bin"),
+            read("nubble_runtime_cloud_high.bin"),
+        )
+        if (ok) applyScene(JSONObject(String(read("nubble-runtime-scene-v1.json"))))
+        return ok
+    }
+
+    /** Same scene schema the P4 consumes; bundled copy is the offline
+     * fallback, and the caller may re-apply a freshly fetched one. */
+    fun applyScene(scene: JSONObject) {
+        val sky = scene.optJSONObject("sky_color") ?: JSONObject()
+        val sun = scene.optJSONObject("sun") ?: JSONObject()
+        val clouds = scene.optJSONObject("clouds") ?: JSONObject()
+        val ocean = scene.optJSONObject("ocean") ?: JSONObject()
+
+        val waves = ArrayList<Int>()
+        val components = ocean.optJSONArray("components")
+        if (components != null) {
+            for (i in 0 until minOf(components.length(), 3)) {
+                val component = components.getJSONObject(i)
+                waves.add((component.optDouble("height_m", 0.5) * 1000).toInt())
+                waves.add((component.optDouble("period_s", 7.0) * 1000).toInt())
+                waves.add(
+                    component.optDouble(
+                        "wave_from_deg",
+                        ocean.optDouble("wave_from_deg", 137.0),
+                    ).toInt(),
+                )
+            }
+        }
+        if (waves.isEmpty()) waves.addAll(listOf(500, 7000, 137))
+
+        // Shell winds: the state JSON carries measured winds per shell where
+        // available; height/bias defaults mirror the firmware's.
+        val shellDefaults = listOf(
+            Pair(6000, 14), Pair(3000, 9), Pair(1200, 4),
+        )
+        val shells = ArrayList<Int>()
+        val shellArray = clouds.optJSONArray("shells")
+        for (s in 0 until 3) {
+            val shell = shellArray?.optJSONObject(s)
+            shells.add(((shell?.optDouble("wind_east_mps", 4.0) ?: 4.0) * 1000).toInt())
+            shells.add(((shell?.optDouble("wind_north_mps", 2.0) ?: 2.0) * 1000).toInt())
+            shells.add(shell?.optInt("height_m", shellDefaults[s].first)
+                ?: shellDefaults[s].first)
+            shells.add(shellDefaults[s].second)
+        }
+
+        val altitudeDeci = ((sun.optDouble("altitude_deg", 45.0)) * 10).toInt()
+        val sunMode = when {
+            altitudeDeci >= 0 -> 0
+            altitudeDeci >= -60 -> 1
+            altitudeDeci >= -120 -> 2
+            else -> 3
+        }
+        nativeSetConditions(
+            sky.optInt("r", 168), sky.optInt("g", 208), sky.optInt("b", 228),
+            sunMode, altitudeDeci,
+            ((sun.optDouble("azimuth_deg", 90.0) - 90.0) * 10).toInt(),
+            (clouds.optDouble("cover_fraction",
+                scene.optDouble("cloud_cover", 0.0)) * 1000).toInt(),
+            waves.toIntArray(), shells.toIntArray(),
+        )
+    }
+
+    private fun read(name: String): ByteArray =
+        assets.open(name).use { it.readBytes() }
+
+    private fun decodeBaseRgb(): ByteArray {
+        val options = BitmapFactory.Options().apply {
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+            inScaled = false
+        }
+        val bitmap = assets.open("nubble_runtime_base.jpg").use {
+            BitmapFactory.decodeStream(it, null, options)
+        } ?: error("base frame did not decode")
+        val pixels = IntArray(bitmap.width * bitmap.height)
+        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        bitmap.recycle()
+        val rgb = ByteArray(pixels.size * 3)
+        for (i in pixels.indices) {
+            val p = pixels[i]
+            rgb[i * 3] = ((p shr 16) and 0xFF).toByte()
+            rgb[i * 3 + 1] = ((p shr 8) and 0xFF).toByte()
+            rgb[i * 3 + 2] = (p and 0xFF).toByte()
+        }
+        return rgb
+    }
+
+    companion object {
+        init {
+            System.loadLibrary("luminary_core")
+        }
+    }
+}
