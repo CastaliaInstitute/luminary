@@ -128,6 +128,14 @@ static uint8_t *wave_breaker_phase_row;
  * the boot-critical window like the other row scratch. */
 static uint8_t *cloud_row_trans;
 static uint8_t *cloud_row_add; /* interleaved b, g, r per half-res column */
+/* Three-row ring of the authored frame in internal RAM, feeding the water
+ * pass's displaced refraction reads. Scattered PSRAM reads of the base frame
+ * depend on L2 residency that the solver's 220 KB steps and the die
+ * temperature both erode; one sequential 3 KB copy per row is prefetch-
+ * friendly and immune to either, and every displaced read after it is
+ * internal-RAM cheap. Slot = row % 3. */
+static uint8_t *base_row_ring;
+
 /* 4x4 ordered dither for the shade quantisation, 0..15. Read once per water
  * pixel from an IRAM loop, so it must be RAM: written at renderer start
  * precisely so the compiler cannot const-promote it into flash rodata --
@@ -467,6 +475,9 @@ static void initialize_wave_lut(void)
     cloud_y_lut = heap_caps_malloc(LUMINARY_RUNTIME_HORIZON,
                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     ESP_ERROR_CHECK(wave_sine && cloud_y_lut ? ESP_OK : ESP_ERR_NO_MEM);
+    base_row_ring = heap_caps_malloc(3U * LUMINARY_WIDTH * LUMINARY_BPP,
+                                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    ESP_ERROR_CHECK(base_row_ring ? ESP_OK : ESP_ERR_NO_MEM);
     wave_shade_row = heap_caps_malloc(LUMINARY_WIDTH / 2U,
                                       MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     wave_breaker_phase_row = heap_caps_malloc(LUMINARY_WIDTH / 2U,
@@ -2111,8 +2122,9 @@ static void render_water_row(uint8_t *row, const uint8_t *base, unsigned y,
             int sy = (int)y + (wave_dy_row[phase_x] * taper_q8 >> 8);
             if (sy < (int)LUMINARY_RUNTIME_HORIZON) sy = (int)LUMINARY_RUNTIME_HORIZON;
             if (sy >= (int)LUMINARY_HEIGHT) sy = (int)LUMINARY_HEIGHT - 1;
-            const uint8_t *source = base +
-                ((size_t)sy * LUMINARY_WIDTH + (size_t)sx) * LUMINARY_BPP;
+            const uint8_t *source = base_row_ring +
+                (size_t)(sy % 3) * LUMINARY_WIDTH * LUMINARY_BPP +
+                (size_t)sx * LUMINARY_BPP;
             bgr[0] = (*colour)[0][shade_index][source[0]];
             bgr[1] = (*colour)[1][shade_index][source[1]];
             bgr[2] = (*colour)[2][shade_index][source[2]];
@@ -2185,7 +2197,8 @@ static void render_water_row(uint8_t *row, const uint8_t *base, unsigned y,
 // nothing, because the function was inlined into app_main and IRAM_ATTR
 // never applied. noinline is load-bearing.)
 static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint64_t elapsed_ms,
-                                bool cycle_base, bool water_rows_hold_base)
+                                bool cycle_base, bool water_rows_hold_base,
+                                bool refresh_sky)
 {
     // Start from the authored frame in one DMA-friendly copy. Per-pixel
     // three-byte memcpy calls were dominating render time on the P4.
@@ -2348,7 +2361,9 @@ static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint
         // the right rock bytes. Measured with the pixel-outer water pass:
         // skipping saves 26 ms of copy for a 15 ms slowdown of the displaced
         // refraction reads the copy was accidentally prefetching.
-        if (y < LUMINARY_RUNTIME_HORIZON || !(sim_frame && water_rows_hold_base)) {
+        if (y < LUMINARY_RUNTIME_HORIZON
+                ? refresh_sky
+                : !(sim_frame && water_rows_hold_base)) {
             memcpy(destination + (size_t)y * row_bytes, base + (size_t)y * row_bytes,
                    row_bytes);
         }
@@ -2375,9 +2390,35 @@ static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint
             compute_wave_row(ocean_phase + phase_row, shade_recip_q16);
 #endif
         }
+#if CONFIG_LUMINARY_OCEAN_SIM
+        if (y >= LUMINARY_RUNTIME_HORIZON && sim_frame) {
+            const size_t ring_bytes = (size_t)LUMINARY_WIDTH * LUMINARY_BPP;
+            if (y == LUMINARY_RUNTIME_HORIZON) {
+                for (unsigned fill = LUMINARY_RUNTIME_HORIZON - 1u;
+                     fill <= LUMINARY_RUNTIME_HORIZON + 1u; ++fill) {
+                    memcpy(base_row_ring + (size_t)(fill % 3u) * ring_bytes,
+                           base + (size_t)fill * ring_bytes, ring_bytes);
+                }
+            } else {
+                const unsigned next = y + 1u < LUMINARY_HEIGHT ? y + 1u
+                                                               : LUMINARY_HEIGHT - 1u;
+                memcpy(base_row_ring + (size_t)(next % 3u) * ring_bytes,
+                       base + (size_t)next * ring_bytes, ring_bytes);
+            }
+        }
+#endif
         PROF_STAMP(prof_r0);
         PROF_ADD(prof_wave_us, prof_w0, prof_r0);
         if (y < LUMINARY_RUNTIME_HORIZON) {
+            // Fluidity comes from redrawing only what moves. The sky changes
+            // on 30-second solar updates and minutes-long cloud drift; the
+            // water moves every frame. Water-only frames leave this
+            // framebuffer's sky as its own last refresh (each buffer
+            // refreshes its own sky, so double buffering stays consistent).
+            if (!refresh_sky) {
+                PROF_ADD(prof_sky_us, prof_r0, esp_timer_get_time());
+                continue;
+            }
             // The water mask has no set pixels above the horizon (verified
             // against the asset), so the whole row is sky and can be graded
             // once per row instead of once per pixel.
@@ -2391,7 +2432,9 @@ static void render_runtime_frame(uint8_t *destination, const uint8_t *base, uint
         PROF_ADD(prof_water_us, prof_r0, prof_r1);
     }
     PROF_RESTAMP(prof_mark);
-    overlay_real_stars(destination, cloud_shift_x, cloud_shift_y, cloud_cover_permille);
+    if (refresh_sky) {
+        overlay_real_stars(destination, cloud_shift_x, cloud_shift_y, cloud_cover_permille);
+    }
     PROF_SET(prof_stars_us, prof_mark);
 }
 
@@ -2599,9 +2642,21 @@ void app_main(void)
         // moment it has rendered one frame of the static base; a wave-cycle
         // frame overwrites them with that cycle frame, invalidating it.
         static bool fb_water_rows_hold_base[2] = {false, false};
+        static uint8_t fb_frames_since_sky[2] = {255, 255};
+        bool refresh_sky = true;
+#if CONFIG_LUMINARY_OCEAN_SIM
+        // Each framebuffer refreshes its own sky every 24th of its frames --
+        // a couple of seconds of sky staleness at the water cadence, well
+        // inside the 30-second solar update interval.
+        if (ocean_ready && !use_wave_cycle) {
+            refresh_sky = fb_frames_since_sky[target] >= 24u;
+        }
+#endif
         render_runtime_frame(framebuffer[target], cycle_base, elapsed_ms, use_wave_cycle,
-                             fb_water_rows_hold_base[target]);
+                             fb_water_rows_hold_base[target], refresh_sky);
         fb_water_rows_hold_base[target] = !use_wave_cycle;
+        if (refresh_sky) fb_frames_since_sky[target] = 0;
+        else if (fb_frames_since_sky[target] < 255u) ++fb_frames_since_sky[target];
         xSemaphoreTake(runtime_lock, portMAX_DELAY);
         PROF_STAMP(prof_fb0);
         PROF_SET(prof_fbcopy_us, prof_fb0);
@@ -2635,9 +2690,21 @@ void app_main(void)
         // satellite shells measure ~284 ms/frame, so cloudy scenes use 3 fps
         // rather than missing a 6 fps deadline. A long live upload cannot
         // leave the task in a permanent catch-up loop.
-        const TickType_t frame_period = pdMS_TO_TICKS(1000U / (cloudy ? 3U : 6U));
+        TickType_t frame_period = pdMS_TO_TICKS(1000U / (cloudy ? 3U : 6U));
+#if CONFIG_LUMINARY_OCEAN_SIM
+        // Solver-driven water-only frames pace at 15 fps; long frames (sky
+        // refresh, heavy sea) just breathe through the deadline guard.
+        if (ocean_ready && !use_wave_cycle) frame_period = pdMS_TO_TICKS(66);
+#endif
+        // Pace to the period when ahead; run back-to-back when behind. The
+        // old catch-up guard reset the deadline and then still slept a full
+        // period, which taxed every over-budget frame an extra 66 ms.
+        deadline += frame_period;
         const TickType_t now = xTaskGetTickCount();
-        if ((int32_t)(now - deadline) > (int32_t)frame_period) deadline = now;
-        vTaskDelayUntil(&deadline, frame_period);
+        if ((int32_t)(deadline - now) > 0) {
+            vTaskDelay(deadline - now);
+        } else {
+            deadline = now;
+        }
     }
 }
