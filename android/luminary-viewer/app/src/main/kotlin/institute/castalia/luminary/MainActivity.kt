@@ -73,9 +73,17 @@ class MainActivity : Activity() {
         val viewportWidth = viewportHeight * 1024 / 600
         val root = FrameLayout(this)
         root.setBackgroundColor(Color.BLACK)
+        // Top-aligned: the frame design seats the phone against the top of
+        // the window and a 3D-printed foreground relief occupies the bottom,
+        // exactly as the full-size build layers its printed rocks over the
+        // panel. The print's top edge is the registration line; everything
+        // below whatever it covers is physical.
         root.addView(
             surface,
-            FrameLayout.LayoutParams(viewportWidth, viewportHeight, Gravity.CENTER),
+            FrameLayout.LayoutParams(
+                viewportWidth, viewportHeight,
+                Gravity.TOP or Gravity.CENTER_HORIZONTAL,
+            ),
         )
         setContentView(root)
         hideSystemUi()
