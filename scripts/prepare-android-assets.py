@@ -61,36 +61,24 @@ def main() -> None:
     base.convert("RGB").resize((w, h), _Image.LANCZOS).save(
         DST / "nubble_runtime_base.jpg", quality=95)
 
+    comp = ROOT / "scenes/nubble-aligned/compiled"
     bits = np.unpackbits(
-        np.fromfile(SRC / "nubble_runtime_water_mask.bin", dtype=np.uint8),
+        np.fromfile(comp / "nubble-c85-water.bin", dtype=np.uint8),
         bitorder="little").reshape(HEIGHT, WIDTH)
     big = np.repeat(np.repeat(bits, scale, 0), scale, 1)
     np.packbits(big.flatten(), bitorder="little").tofile(
         DST / "nubble_runtime_water_mask.bin")
 
-    shore = np.fromfile(SRC / "nubble_runtime_shore_distance.bin",
+    shore = np.fromfile(comp / "nubble-c85-shore.bin",
                         dtype=np.uint8).reshape(HEIGHT, WIDTH)
     np.repeat(np.repeat(shore, scale, 0), scale, 1).tofile(
         DST / "nubble_runtime_shore_distance.bin")
 
-    # Land mask: the solid, pass-through parts of the photo -- the island and
-    # lighthouse (which rise above the horizon) plus the foreground rocks.
-    # Sky rows grade everything that is NOT land; below the horizon anything
-    # that is not water is land already, so this mask matters most for the
-    # island poking into the sky band. Bit-packed like the water mask.
-    comp = ROOT / "scenes/nubble-aligned/compiled"
-    island = np.array(Image.open(comp / "island-mask.png").convert("L")) > 128
-    foreground = np.array(Image.open(comp / "foreground-mask.png").convert("L")) > 128
-    land = island | foreground
-    # Erode the pass-through region by one source pixel. The island mask was
-    # traced a pixel or two into the original photo's bright sky-haze halo, so
-    # its outermost rim is photo-sky, not rock. Passed through untouched that
-    # rim reads as a hard white outline against the night-graded sky; ceding
-    # it back to the sky (which then grades with the rest) trims the edge. The
-    # geometry loss is ~2 screen pixels, invisible, and the print covers this
-    # boundary anyway.
-    from scipy import ndimage as _ndi
-    land = _ndi.binary_erosion(land, iterations=1)
+    # Land mask: the registered island + rocks + structures traced to the new
+    # photo's own silhouette (see reg-seg), so the water/land boundary matches
+    # the pixels exactly -- no fringe from an old silhouette.
+    land = np.unpackbits(np.fromfile(comp / "nubble-c85-land.bin", dtype=np.uint8),
+                         bitorder="little").reshape(HEIGHT, WIDTH).astype(bool)
     land_big = np.repeat(np.repeat(land, scale, 0), scale, 1)
     np.packbits(land_big.flatten(), bitorder="little").tofile(
         DST / "nubble_runtime_land_mask.bin")
