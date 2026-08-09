@@ -4,6 +4,7 @@
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 #include <android/log.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -12,7 +13,12 @@
 #define TAG "luminary-core"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 
+/* The render thread writes into the window's buffer; the UI thread swaps the
+ * window on surfaceCreated/Destroyed (screen sleep/wake on a wall display).
+ * Without this lock the render thread can write into a window the UI thread
+ * has just released -- a use-after-free that SIGSEGVs in lum_render_frame. */
 static ANativeWindow *window;
+static pthread_mutex_t window_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Asset bytes arrive as Java byte[] copies and are kept for the process
  * lifetime; the core reads them in place. */
@@ -105,6 +111,7 @@ Java_institute_castalia_luminary_LuminaryCore_nativeSetSurface(
     JNIEnv *env, jobject self, jobject surface)
 {
     (void)self;
+    pthread_mutex_lock(&window_lock);
     if (window) {
         ANativeWindow_release(window);
         window = NULL;
@@ -116,6 +123,7 @@ Java_institute_castalia_luminary_LuminaryCore_nativeSetSurface(
                                              WINDOW_FORMAT_RGBX_8888);
         }
     }
+    pthread_mutex_unlock(&window_lock);
 }
 
 JNIEXPORT jboolean JNICALL
@@ -123,10 +131,15 @@ Java_institute_castalia_luminary_LuminaryCore_nativeRenderFrame(
     JNIEnv *env, jobject self, jlong elapsed_ms)
 {
     (void)env; (void)self;
-    if (!window) return JNI_FALSE;
+    pthread_mutex_lock(&window_lock);
+    if (!window) { pthread_mutex_unlock(&window_lock); return JNI_FALSE; }
     ANativeWindow_Buffer buffer;
-    if (ANativeWindow_lock(window, &buffer, NULL) != 0) return JNI_FALSE;
+    if (ANativeWindow_lock(window, &buffer, NULL) != 0) {
+        pthread_mutex_unlock(&window_lock);
+        return JNI_FALSE;
+    }
     lum_render_frame((uint32_t *)buffer.bits, buffer.stride, (uint64_t)elapsed_ms);
     ANativeWindow_unlockAndPost(window);
+    pthread_mutex_unlock(&window_lock);
     return JNI_TRUE;
 }
