@@ -70,7 +70,7 @@ class MainActivity : Activity() {
         // black regardless.
         val metrics = resources.displayMetrics
         val viewportHeight = minOf(metrics.widthPixels, metrics.heightPixels)
-        val viewportWidth = viewportHeight * 1024 / 600
+        val viewportWidth = viewportHeight * 2048 / 1200
         val root = FrameLayout(this)
         root.setBackgroundColor(Color.BLACK)
         // Top-aligned: the frame design seats the phone against the top of

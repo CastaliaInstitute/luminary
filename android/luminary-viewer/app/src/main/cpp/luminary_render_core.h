@@ -16,9 +16,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define LUM_WIDTH  1024
-#define LUM_HEIGHT 600
-#define LUM_HORIZON 291
+/* Double the P4 panel's 1024x600: everything upstream of the base
+ * photograph is resolution-independent (continuous camera fit, world-space
+ * solver, per-pixel shading), so the phone renders the same scene at 2x and
+ * the compositor's slight downscale to the glass supersamples it. */
+#define LUM_WIDTH  2048
+#define LUM_HEIGHT 1200
+#define LUM_HORIZON 582
 
 /* All buffers are caller-owned copies of the repo's runtime assets. */
 typedef struct {

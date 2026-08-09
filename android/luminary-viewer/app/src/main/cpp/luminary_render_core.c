@@ -11,9 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define OCEAN_MAP_W 512
-#define OCEAN_MAP_ROW0 145
-#define OCEAN_MAP_ROWS 155
+#define OCEAN_MAP_W 1024
+#define OCEAN_MAP_ROW0 290
+#define OCEAN_MAP_ROWS 310
 #define OCEAN_MAP_NONE 0xFFFFu
 #define CLOUD_W 256
 #define CLOUD_H 96

@@ -55,7 +55,21 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--preview", type=Path,
                         default=ROOT / "scenes/nubble-aligned/compiled/ocean-map-preview.png")
+    parser.add_argument("--scale", type=int, default=1,
+                        help="integer screen-resolution multiplier; the fitted "
+                             "camera model is continuous, so the map regenerates "
+                             "at any scale rather than being resampled")
+    parser.add_argument("--output", type=Path, default=OUTPUT)
     args = parser.parse_args()
+
+    global WIDTH, HEIGHT, HORIZON, CX, CY, MAP_W, MAP_ROW0, MAP_H
+    WIDTH *= args.scale
+    HEIGHT *= args.scale
+    HORIZON *= args.scale
+    CX, CY = (WIDTH - 1) / 2.0, (HEIGHT - 1) / 2.0
+    MAP_W = WIDTH // 2
+    MAP_ROW0 = (HORIZON - 1) // 2
+    MAP_H = HEIGHT // 2 - MAP_ROW0
 
     projection = json.loads(PROJECTION.read_text())
     camera = projection["camera"]
@@ -67,7 +81,8 @@ def main() -> None:
                         dtype=np.uint8).reshape(ny, nx)
 
     cam_e, cam_n, cam_h = camera["east_m"], camera["north_m"], camera["height_m"]
-    focal, yaw = camera["focal_px"], math.radians(camera["yaw_deg"])
+    # Intrinsics scale linearly with resolution; the fit was at 1x.
+    focal, yaw = camera["focal_px"] * args.scale, math.radians(camera["yaw_deg"])
     pitch = math.atan2(CY - HORIZON, focal)
 
     fwd = np.array([math.sin(yaw) * math.cos(pitch),
@@ -121,13 +136,21 @@ def main() -> None:
     on_land[mapped] = depth.reshape(-1)[cell[mapped]] == 0
     grid[..., 1][on_land] = SENTINEL
 
-    grid.tofile(OUTPUT)
-    print(f"wrote {OUTPUT} ({grid.nbytes} bytes, {MAP_W}x{MAP_H} Q8.8 pairs)")
+    grid.tofile(args.output)
+    print(f"wrote {args.output} ({grid.nbytes} bytes, {MAP_W}x{MAP_H} Q8.8 pairs)")
 
+    # The coverage report reads the 1x runtime mask regardless of --scale
+    # (only the map's sampling density changes with scale, not which screen
+    # cells are water). Sample it at the map's own row/column stride.
     mask = np.unpackbits(np.fromfile(MASK, dtype=np.uint8),
-                         bitorder="little").reshape(HEIGHT, WIDTH)
-    water_half = mask[MAP_ROW0 * 2 : (MAP_ROW0 + MAP_H) * 2 : 2, ::2] == 1
-    served = (grid[..., 1] != SENTINEL) & water_half
+                         bitorder="little").reshape(600, 1024)
+    row0_1x = MAP_ROW0 * 2 * 600 // HEIGHT
+    rows_1x = MAP_H * 2 * 600 // HEIGHT
+    col_stride = 1024 // MAP_W if MAP_W <= 1024 else 1
+    row_stride = max(1, 600 * 2 // HEIGHT)
+    water_half = mask[row0_1x : row0_1x + rows_1x : row_stride, ::col_stride] == 1
+    water_half = water_half[:MAP_H, :MAP_W]
+    served = (grid[..., 1] != SENTINEL) & water_half[:grid.shape[0], :grid.shape[1]]
     print(f"solver serves {served.sum()} of {water_half.sum()} water cells "
           f"({served.sum() / water_half.sum() * 100.0:.1f}%); "
           f"the rest keep the sine-phase path")
