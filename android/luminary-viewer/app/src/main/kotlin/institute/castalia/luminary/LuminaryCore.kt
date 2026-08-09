@@ -25,6 +25,11 @@ class LuminaryCore(private val assets: AssetManager) {
     external fun nativeSetSurface(surface: Surface?)
     external fun nativeRenderFrame(elapsedMs: Long): Boolean
 
+    /** The scene currently driving conditions -- the bundled fallback until a
+     * live bundle is fetched. Waves (buoy) and clouds (GOES) come from here;
+     * the sun is always computed on-device from the clock. */
+    @Volatile var activeScene: JSONObject = JSONObject()
+
     fun initialize(): Boolean {
         val ok = nativeInit(
             decodeBaseRgb(),
@@ -37,15 +42,18 @@ class LuminaryCore(private val assets: AssetManager) {
             read("nubble_runtime_cloud_mid.bin"),
             read("nubble_runtime_cloud_high.bin"),
         )
-        if (ok) applyScene(JSONObject(String(read("nubble-runtime-scene-v1.json"))))
+        if (ok) {
+            activeScene = JSONObject(String(read("nubble-runtime-scene-v1.json")))
+            applyScene(activeScene)
+        }
         return ok
     }
 
     /** Same scene schema the P4 consumes; bundled copy is the offline
      * fallback, and the caller may re-apply a freshly fetched one. */
     fun applyScene(scene: JSONObject) {
-        val sky = scene.optJSONObject("sky_color") ?: JSONObject()
-        val sun = scene.optJSONObject("sun") ?: JSONObject()
+        activeScene = scene
+        val sky = scene.optJSONObject("sky_color") ?: scene.optJSONObject("sky") ?: JSONObject()
         val clouds = scene.optJSONObject("clouds") ?: JSONObject()
         val ocean = scene.optJSONObject("ocean") ?: JSONObject()
 
@@ -82,17 +90,23 @@ class LuminaryCore(private val assets: AssetManager) {
             shells.add(shellDefaults[s].second)
         }
 
-        val altitudeDeci = ((sun.optDouble("altitude_deg", 45.0)) * 10).toInt()
+        // Sun is computed from the device clock for York, so the sky tracks
+        // the real day continuously and offline -- the scene JSON's sun field
+        // is a stale snapshot and is deliberately ignored.
+        val solar = SolarPosition.current()
+        val altitudeDeci = (solar.altitudeDeg * 10).toInt()
         val sunMode = when {
-            altitudeDeci >= 0 -> 0
-            altitudeDeci >= -60 -> 1
-            altitudeDeci >= -120 -> 2
-            else -> 3
+            altitudeDeci >= 0 -> 0        // day
+            altitudeDeci >= -60 -> 1      // civil twilight
+            altitudeDeci >= -120 -> 2     // nautical
+            else -> 3                     // night
         }
+        // Bearing from shore is due east (90 deg); relative azimuth drives the
+        // side-weighted golden-hour glow.
         nativeSetConditions(
             sky.optInt("r", 168), sky.optInt("g", 208), sky.optInt("b", 228),
             sunMode, altitudeDeci,
-            ((sun.optDouble("azimuth_deg", 90.0) - 90.0) * 10).toInt(),
+            ((solar.azimuthDeg - 90.0) * 10).toInt(),
             (clouds.optDouble("cover_fraction",
                 scene.optDouble("cloud_cover", 0.0)) * 1000).toInt(),
             waves.toIntArray(), shells.toIntArray(),

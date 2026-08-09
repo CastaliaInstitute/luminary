@@ -87,7 +87,7 @@ class MainActivity : Activity() {
         )
         setContentView(root)
         hideSystemUi()
-        fetchLiveScene()
+        startConditionsLoop()
     }
 
     private fun startLoops() {
@@ -117,31 +117,56 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Same public runtime state the P4 polls; bundled scene is the offline
-     * fallback, so a dead network changes nothing but freshness. */
-    private fun fetchLiveScene() {
-        thread(name = "luminary-scene") {
-            try {
-                val url = URL(
-                    "https://raw.githubusercontent.com/CastaliaInstitute/luminary/" +
-                        "runtime-live/site/runtime/v1/manifest.json",
-                )
-                val manifest = JSONObject(url.openConnection().let {
-                    (it as HttpURLConnection).apply { connectTimeout = 10000 }
-                        .inputStream.bufferedReader().readText()
-                })
-                val stateName = manifest.getJSONObject("assets")
-                    .getJSONObject("state").getString("file")
-                val state = URL(
-                    "https://raw.githubusercontent.com/CastaliaInstitute/luminary/" +
-                        "runtime-live/site/runtime/v1/$stateName",
-                ).readText()
-                runOnUiThread { core.applyScene(JSONObject(state)) }
-                Log.i(TAG, "live scene applied: $stateName")
-            } catch (e: Exception) {
-                Log.w(TAG, "live scene fetch failed; bundled scene stays", e)
+    /**
+     * The one loop that keeps the scene live. Two cadences share it:
+     *
+     *  - every minute, re-apply the active scene so the on-device solar clock
+     *    advances the sky through the real day -- this needs no network and is
+     *    what makes the sky genuinely live even offline;
+     *  - every poll interval, re-fetch the same runtime bundle the P4 consumes
+     *    (NDBC 44098 buoy waves, GOES cloud cover, York tide) so the surf and
+     *    clouds track live data. A failed fetch simply leaves the last good
+     *    conditions in place.
+     */
+    private fun startConditionsLoop() {
+        thread(name = "luminary-conditions") {
+            val pollEveryMs = 10 * 60 * 1000L
+            var lastPoll = 0L
+            while (running) {
+                val now = System.currentTimeMillis()
+                if (now - lastPoll >= pollEveryMs) {
+                    lastPoll = now
+                    fetchLiveScene()?.let { fetched ->
+                        runOnUiThread { core.applyScene(fetched) }
+                        Log.i(TAG, "live conditions applied (buoy waves, cloud cover)")
+                    }
+                }
+                // Re-apply the active scene every second so the solar clock
+                // advances the sky with no visible staleness -- unnecessarily
+                // often for a sun that moves a quarter-degree a minute, which
+                // is the point.
+                runOnUiThread { core.applyScene(core.activeScene) }
+                SystemClock.sleep(1_000)
             }
         }
+    }
+
+    /** Fetch the live runtime bundle the P4 polls; null on any failure so the
+     * caller keeps the last good conditions. */
+    private fun fetchLiveScene(): JSONObject? = try {
+        val root = "https://raw.githubusercontent.com/CastaliaInstitute/luminary/" +
+            "runtime-live/site/runtime/v1"
+        val manifest = JSONObject(
+            (URL("$root/manifest.json").openConnection() as HttpURLConnection)
+                .apply { connectTimeout = 10000; readTimeout = 10000 }
+                .inputStream.bufferedReader().readText(),
+        )
+        val stateName = manifest.getJSONObject("assets")
+            .getJSONObject("state").getString("file")
+        JSONObject(URL("$root/$stateName").readText())
+    } catch (e: Exception) {
+        Log.w(TAG, "live fetch failed; keeping current conditions", e)
+        null
     }
 
     private fun hideSystemUi() {
