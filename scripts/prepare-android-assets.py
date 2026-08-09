@@ -57,7 +57,7 @@ def main() -> None:
     # land mask, the sea-plane projection and its ocean map -- applies
     # unchanged; only the photograph's pixels are newer.
     from PIL import Image as _Image
-    base = _Image.open(ROOT / "scenes/nubble-aligned/compiled/nubble-c85-registered.png")
+    base = _Image.open(ROOT / "scenes/nubble-aligned/compiled/nubble-c85-plainsky.png")
     base.convert("RGB").resize((w, h), _Image.LANCZOS).save(
         DST / "nubble_runtime_base.jpg", quality=95)
 
@@ -105,7 +105,15 @@ def main() -> None:
     scene["sun"] = {"altitude_deg": 42.0, "azimuth_deg": 170.0,
                     "off_screen": False, "state": "day", "visual_phase": "day"}
     scene.setdefault("sky", {}).update({"r": 170, "g": 205, "b": 232})
-    scene.setdefault("clouds", {})["cover_fraction"] = 0.0
+    # Three GOES cloud layers composite over the plain sky, drifting on the
+    # measured winds. Cover is a placeholder until the live poll supplies it.
+    scene.setdefault("clouds", {})
+    scene["clouds"]["cover_fraction"] = 0.55
+    scene["clouds"]["shells"] = [
+        {"wind_east_mps": 6.0, "wind_north_mps": 2.5, "height_m": 6000},
+        {"wind_east_mps": 4.0, "wind_north_mps": 1.5, "height_m": 3000},
+        {"wind_east_mps": 2.5, "wind_north_mps": 1.0, "height_m": 1200},
+    ]
     (DST / "nubble-runtime-scene-v1.json").write_text(_json.dumps(scene, indent=2))
 
     print(f"prepared {scale}x Android assets ({w}x{h}) in {DST}")
