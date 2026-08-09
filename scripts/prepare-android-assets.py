@@ -79,6 +79,15 @@ def main() -> None:
     island = np.array(Image.open(comp / "island-mask.png").convert("L")) > 128
     foreground = np.array(Image.open(comp / "foreground-mask.png").convert("L")) > 128
     land = island | foreground
+    # Erode the pass-through region by one source pixel. The island mask was
+    # traced a pixel or two into the original photo's bright sky-haze halo, so
+    # its outermost rim is photo-sky, not rock. Passed through untouched that
+    # rim reads as a hard white outline against the night-graded sky; ceding
+    # it back to the sky (which then grades with the rest) trims the edge. The
+    # geometry loss is ~2 screen pixels, invisible, and the print covers this
+    # boundary anyway.
+    from scipy import ndimage as _ndi
+    land = _ndi.binary_erosion(land, iterations=1)
     land_big = np.repeat(np.repeat(land, scale, 0), scale, 1)
     np.packbits(land_big.flatten(), bitorder="little").tofile(
         DST / "nubble_runtime_land_mask.bin")
