@@ -25,6 +25,16 @@ class LuminaryCore(private val assets: AssetManager) {
     external fun nativeSetSurface(surface: Surface?)
     external fun nativeRenderFrame(elapsedMs: Long): Boolean
 
+    /** Live cloud atlas hot-swap. `nativeCloudAtlasBytes` is this build's
+     * expected per-shell size; a fetched atlas of a different size is ignored
+     * natively so a stale bundle never corrupts the sky. */
+    external fun nativeSetClouds(low: ByteArray, mid: ByteArray, high: ByteArray)
+    external fun nativeCloudAtlasBytes(): Long
+
+    val cloudAtlasBytes: Long get() = nativeCloudAtlasBytes()
+    fun setClouds(low: ByteArray, mid: ByteArray, high: ByteArray) =
+        nativeSetClouds(low, mid, high)
+
     /** The scene currently driving conditions -- the bundled fallback until a
      * live bundle is fetched. Waves (buoy) and clouds (GOES) come from here;
      * the sun is always computed on-device from the clock. */

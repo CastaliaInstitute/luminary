@@ -25,8 +25,9 @@ typedef uint32_t ocean_map_t;
 typedef uint16_t ocean_map_t;
 #define OCEAN_MAP_NONE 0xFFFFu
 #endif
-#define CLOUD_W 256
-#define CLOUD_H 96
+#define CLOUD_W 1024   /* full GOES-projection resolution: ~2 px/texel over the */
+#define CLOUD_H 291    /* 2048x582 sky, so cloud structure no longer shows the  */
+                       /* coarse 8 px texels that read as sky seams/banding.    */
 #define SHELL_HIGH_M 6000
 #define SHELL_MID_M 3000
 #define SHELL_LOW_M 1200
@@ -62,9 +63,10 @@ static uint8_t shade_dither[4][4] = {
 static int8_t *normal_snapshot;
 static uint8_t *foam_snapshot;
 
-static uint8_t cloud_x_lut[LUM_WIDTH];
-static uint8_t cloud_y_lut[LUM_HORIZON];
+static uint16_t cloud_x_lut[LUM_WIDTH];   /* Q8 atlas x (texel*256 + frac) */
+static uint16_t cloud_y_lut[LUM_HORIZON];  /* Q8 atlas y */
 static uint8_t cloud_row_trans[LUM_WIDTH / 4];
+static uint8_t *cloud_soft[3];      /* load-time softened copies of the atlases */
 static uint8_t cloud_row_add[(LUM_WIDTH / 4) * 3];
 
 static inline bool water_pixel(size_t pixel)
@@ -103,7 +105,14 @@ static inline uint8_t clamp_channel(int v)
  * ripples live where the water actually moves and calm water stays glassy.
  * It is not physics; it is the sub-grid detail the physics cannot resolve,
  * driven by the physics so it never contradicts it. */
-#define DETAIL_N 256           /* power of two: wrap with & (DETAIL_N-1) */
+#define DETAIL_N 512           /* power of two: wrap with & (DETAIL_N-1) */
+
+/* Contrast of the CFD swell shading (shade = -gradient * gain). Higher makes
+ * the data-driven wave crests/troughs -- and thus the large-scale swell rolling
+ * shoreward -- read more strongly against the base photograph. */
+#ifndef CFD_SHADE_GAIN
+#define CFD_SHADE_GAIN 24
+#endif
 static int8_t detail_grad[DETAIL_N * DETAIL_N];
 /* Scroll offsets for two layers, set per frame in lum_render_frame. */
 static int detail_scroll_x0, detail_scroll_y0, detail_scroll_x1, detail_scroll_y1;
@@ -158,6 +167,44 @@ static void build_detail_field(void)
     }
 }
 
+/* Soften a cloud atlas at load with two [1,2,1] separable passes (~radius 2).
+ * The 256x96 atlas is 8 px/texel on screen, so a crisp cloud edge quantises
+ * into a straight, seam-like segment and gives the panel's upscaler sharp fine
+ * structure to alias into banding. Blurring the atlas once, up front, keeps
+ * cloud edges gradual without any per-frame cost. Both channels (luminance,
+ * alpha) are blurred; edges are clamped. */
+#ifndef CLOUD_SOFTEN_PASSES
+#define CLOUD_SOFTEN_PASSES 5
+#endif
+static void soften_atlas(const uint8_t *src, uint8_t *dst)
+{
+    static uint8_t a[CLOUD_W * CLOUD_H * 2], b[CLOUD_W * CLOUD_H * 2];
+    memcpy(a, src, sizeof a);
+    for (int pass = 0; pass < CLOUD_SOFTEN_PASSES; ++pass) {
+        for (int y = 0; y < CLOUD_H; ++y)
+            for (int x = 0; x < CLOUD_W; ++x)
+                for (int c = 0; c < 2; ++c) {
+                    const int xm = x > 0 ? x - 1 : 0;
+                    const int xp = x < CLOUD_W - 1 ? x + 1 : CLOUD_W - 1;
+                    b[(y * CLOUD_W + x) * 2 + c] = (uint8_t)((
+                        a[(y * CLOUD_W + xm) * 2 + c] +
+                        2 * a[(y * CLOUD_W + x) * 2 + c] +
+                        a[(y * CLOUD_W + xp) * 2 + c]) >> 2);
+                }
+        for (int y = 0; y < CLOUD_H; ++y)
+            for (int x = 0; x < CLOUD_W; ++x)
+                for (int c = 0; c < 2; ++c) {
+                    const int ym = y > 0 ? y - 1 : 0;
+                    const int yp = y < CLOUD_H - 1 ? y + 1 : CLOUD_H - 1;
+                    a[(y * CLOUD_W + x) * 2 + c] = (uint8_t)((
+                        b[(ym * CLOUD_W + x) * 2 + c] +
+                        2 * b[(y * CLOUD_W + x) * 2 + c] +
+                        b[(yp * CLOUD_W + x) * 2 + c]) >> 2);
+                }
+    }
+    memcpy(dst, a, sizeof a);
+}
+
 bool lum_init(const lum_assets_t *bound)
 {
     assets = *bound;
@@ -166,10 +213,10 @@ bool lum_init(const lum_assets_t *bound)
         wave_sine[i] = (int8_t)lrintf(127.0f * sinf((float)i * 6.28318530718f / 256.0f));
     }
     for (unsigned x = 0; x < LUM_WIDTH; ++x) {
-        cloud_x_lut[x] = (uint8_t)(x * CLOUD_W / LUM_WIDTH);
+        cloud_x_lut[x] = (uint16_t)((unsigned)x * CLOUD_W * 256u / LUM_WIDTH);
     }
     for (unsigned y = 0; y < LUM_HORIZON; ++y) {
-        cloud_y_lut[y] = (uint8_t)(y * CLOUD_H / LUM_HORIZON);
+        cloud_y_lut[y] = (uint16_t)((unsigned)y * CLOUD_H * 256u / LUM_HORIZON);
     }
 
     sim_h = calloc(OCEAN_CELLS, sizeof(int16_t));
@@ -184,6 +231,13 @@ bool lum_init(const lum_assets_t *bound)
         !sim_damp_residual || !normal_snapshot || !foam_snapshot) {
         return false;
     }
+    const uint8_t *raw_atlas[3] = {assets.cloud_high, assets.cloud_mid, assets.cloud_low};
+    for (int i = 0; i < 3; ++i) {
+        cloud_soft[i] = malloc((size_t)CLOUD_W * CLOUD_H * 2);
+        if (!cloud_soft[i]) return false;
+        soften_atlas(raw_atlas[i], cloud_soft[i]);
+    }
+
     memcpy(sim_depth, assets.ocean_depth, OCEAN_CELLS);
     ocean_sim_bind(&sim, sim_h, sim_vel, sim_depth, sim_normal, sim_foam,
                    sim_damp_residual);
@@ -216,6 +270,19 @@ void lum_set_conditions(const lum_conditions_t *next)
     ocean_sim_set_components(&sim, comp, count, 90);
     sim_ready = true;
     pthread_mutex_unlock(&sim_lock);
+    pthread_mutex_unlock(&state_lock);
+}
+
+size_t lum_cloud_atlas_bytes(void) { return (size_t)CLOUD_W * CLOUD_H * 2u; }
+
+void lum_set_clouds(const uint8_t *low, const uint8_t *mid, const uint8_t *high)
+{
+    /* cloud_soft is ordered {high, mid, low} to match the render's shell loop. */
+    const uint8_t *raw[3] = {high, mid, low};
+    pthread_mutex_lock(&state_lock);
+    for (int i = 0; i < 3; ++i) {
+        if (raw[i] && cloud_soft[i]) soften_atlas(raw[i], cloud_soft[i]);
+    }
     pthread_mutex_unlock(&state_lock);
 }
 
@@ -335,7 +402,16 @@ static void compute_wave_row(const ocean_map_t *map_row, int shade_recip_q16)
             continue;
         }
         const unsigned cx = gx_q8 >> 8, cy = gy_q8 >> 8;
-        const int fx = (int)(gx_q8 & 0xFFu), fy = (int)(gy_q8 & 0xFFu);
+        /* Smoothstep the interpolation fractions (Hermite 3t^2-2t^3 in Q8).
+         * Plain bilinear is value-continuous but slope-DIScontinuous at cell
+         * boundaries; since shade = -gradient*24 amplifies slope, those slope
+         * jumps read as the projected solver grid -- faint diagonal
+         * parallelogram tiling in smooth near-field water. Smoothstep zeroes
+         * the derivative at the cell nodes (C1), so the facets disappear
+         * without a finer, costlier grid. */
+        int fx = (int)(gx_q8 & 0xFFu), fy = (int)(gy_q8 & 0xFFu);
+        fx = fx * fx * (768 - 2 * fx) >> 16;
+        fy = fy * fy * (768 - 2 * fy) >> 16;
         const size_t c00 = (size_t)cy * OCEAN_NX + cx;
         const size_t c10 = c00 + OCEAN_NX;
         const int n00 = normal_snapshot[2u * c00 + 1u];
@@ -345,9 +421,21 @@ static void compute_wave_row(const ocean_map_t *map_row, int shade_recip_q16)
         const int top = n00 + ((n01 - n00) * fx >> 8);
         const int bottom = n10 + ((n11 - n10) * fx >> 8);
         const int gradient = top + ((bottom - top) * fy >> 8);
-        const int gradient_x = normal_snapshot[2u * c00];
+        /* Interpolate the X gradient across the cell too. Sampled from the
+         * nearest cell it was piecewise-constant, so the refraction offset dx
+         * below jumped at every solver-cell boundary; in the near field where
+         * one 1 m cell spans a wide screen patch those jumps displaced the base
+         * photo in constant blocks -- the projected grid read as diamond
+         * tiling. Bilerping it makes the displacement vary smoothly. */
+        const int gx00 = normal_snapshot[2u * c00];
+        const int gx01 = normal_snapshot[2u * (c00 + 1u)];
+        const int gx10 = normal_snapshot[2u * c10];
+        const int gx11 = normal_snapshot[2u * (c10 + 1u)];
+        const int gx_top = gx00 + ((gx01 - gx00) * fx >> 8);
+        const int gx_bottom = gx10 + ((gx11 - gx10) * fx >> 8);
+        const int gradient_x = gx_top + ((gx_bottom - gx_top) * fy >> 8);
 
-        int shade = -gradient * 24;
+        int shade = -gradient * CFD_SHADE_GAIN;
         if (shade < -128) shade = -128;
         if (shade > 127) shade = 127;
         wave_shade_row[px] = (int8_t)shade;
@@ -374,7 +462,19 @@ static void compute_wave_row(const ocean_map_t *map_row, int shade_recip_q16)
 
 /* ---- sky (firmware: render_sky_row, composed clouds + grade) */
 
-static inline int wrap_cloud_x(int v) { return v & (CLOUD_W - 1); }
+/* Mirror-fold both atlas axes. Plain wrap in X made the atlas repeat every
+ * CLOUD_W texels; because the GOES crop is not horizontally tileable, texel
+ * 255 abutted texel 0 at a hard discontinuity, and with cloud drift that
+ * boundary swept across the sky as a vertical seam (one per shell). Reflecting
+ * at the edge -- exactly what Y already does -- keeps the field C0 across the
+ * fold, so there is no seam. */
+static inline int mirror_cloud_x(int v)
+{
+    const int period = 2 * (CLOUD_W - 1);
+    v %= period;
+    if (v < 0) v += period;
+    return v < CLOUD_W ? v : period - v;
+}
 
 static inline int mirror_cloud_y(int v)
 {
@@ -393,20 +493,40 @@ static void render_sky_row(uint32_t *out, const uint8_t *base_row, unsigned y,
         const unsigned feather = clearance < 22u ? clearance : 22u;
         memset(cloud_row_trans, 255, sizeof(cloud_row_trans));
         memset(cloud_row_add, 0, sizeof(cloud_row_add));
-        const uint8_t *atlases[3] = {assets.cloud_high, assets.cloud_mid, assets.cloud_low};
+        const uint8_t *atlases[3] = {cloud_soft[0], cloud_soft[1], cloud_soft[2]};
         for (unsigned shell = 0; shell < 3u; ++shell) {
-            const int atlas_y = mirror_cloud_y((int)cloud_y_lut[y] + shift_y[shell]);
-            const uint8_t *atlas_row = atlases[shell] + (size_t)atlas_y * CLOUD_W * 2u;
+            /* Bilinear atlas fetch. The atlas is only 256x96 stretched across
+             * the 2048x582 sky, so nearest sampling turned every texel into a
+             * flat ~8x6 px block -- the sky "tiling". Interpolate both axes so
+             * the low-res cloud field reads as a smooth gradient. */
+            const int ay_q8 = (int)cloud_y_lut[y] + (shift_y[shell] << 8);
+            const int iy = ay_q8 >> 8;
+            const unsigned fyc = (unsigned)(ay_q8 & 0xFF);
+            const uint8_t *row0 = atlases[shell] +
+                (size_t)mirror_cloud_y(iy) * CLOUD_W * 2u;
+            const uint8_t *row1 = atlases[shell] +
+                (size_t)mirror_cloud_y(iy + 1) * CLOUD_W * 2u;
             const unsigned bias = conditions.shells[shell].blue_bias;
             const unsigned half_bias = bias / 2u;
-            const int off = shift_x[shell];
+            const int off_q8 = shift_x[shell] << 8;
             for (unsigned q = 0; q < LUM_WIDTH / 4u; ++q) {
-                const unsigned ax = (unsigned)wrap_cloud_x((int)cloud_x_lut[q * 4u] + off);
-                const uint8_t *texel = atlas_row + (size_t)ax * 2u;
-                unsigned alpha = texel[1] * cover / 1000u;
+                const int ax_q8 = (int)cloud_x_lut[q * 4u] + off_q8;
+                const unsigned fxc = (unsigned)(ax_q8 & 0xFF);
+                const unsigned ax0 = (unsigned)mirror_cloud_x(ax_q8 >> 8);
+                const unsigned ax1 = (unsigned)mirror_cloud_x((ax_q8 >> 8) + 1);
+                const uint8_t *t00 = row0 + (size_t)ax0 * 2u;
+                const uint8_t *t01 = row0 + (size_t)ax1 * 2u;
+                const uint8_t *t10 = row1 + (size_t)ax0 * 2u;
+                const uint8_t *t11 = row1 + (size_t)ax1 * 2u;
+                const unsigned l_top = t00[0] + (((int)t01[0] - t00[0]) * (int)fxc >> 8);
+                const unsigned l_bot = t10[0] + (((int)t11[0] - t10[0]) * (int)fxc >> 8);
+                const unsigned lum = l_top + (((int)l_bot - (int)l_top) * (int)fyc >> 8);
+                const unsigned a_top = t00[1] + (((int)t01[1] - t00[1]) * (int)fxc >> 8);
+                const unsigned a_bot = t10[1] + (((int)t11[1] - t10[1]) * (int)fxc >> 8);
+                const unsigned a_tex = a_top + (((int)a_bot - (int)a_top) * (int)fyc >> 8);
+                unsigned alpha = a_tex * cover / 1000u;
                 alpha = alpha * feather / 22u;
                 if (alpha == 0u) continue;
-                const unsigned lum = texel[0];
                 const unsigned cg = lum > half_bias ? lum - half_bias : 0u;
                 const unsigned cr = lum > bias ? lum - bias : 0u;
                 const unsigned keep = 255u - alpha;
@@ -456,13 +576,25 @@ static void render_sky_row(uint32_t *out, const uint8_t *base_row, unsigned y,
         unsigned g = clamp_channel((int)src[1] + shift_g);
         unsigned b = clamp_channel((int)src[2] + shift_b);
         if (conditions.cloud_cover_permille > 0u) {
+            /* The cloud contribution is accumulated once per 4 px quad. Applied
+             * flat it left hard 4 px vertical steps that are invisible at 1x but
+             * that the panel's non-integer upscale beats into visible vertical
+             * banding. Interpolate each quad's transmission and premultiplied
+             * colour across the 4 px it spans so the cloud field is smooth. */
             const unsigned q = x >> 2u;
-            const unsigned trans = cloud_row_trans[q];
+            const unsigned q1 = (q + 1u < LUM_WIDTH / 4u) ? q + 1u : q;
+            const int fx = (int)(x & 3u);
+            const int t0 = cloud_row_trans[q], t1 = cloud_row_trans[q1];
+            const unsigned trans = (unsigned)(t0 + ((t1 - t0) * fx) / 4);
             if (trans != 255u) {
-                const uint8_t *add = cloud_row_add + (size_t)q * 3u;
-                r = r * trans / 255u + add[0];
-                g = g * trans / 255u + add[1];
-                b = b * trans / 255u + add[2];
+                const uint8_t *a0 = cloud_row_add + (size_t)q * 3u;
+                const uint8_t *a1 = cloud_row_add + (size_t)q1 * 3u;
+                const unsigned add0 = (unsigned)(a0[0] + ((a1[0] - a0[0]) * fx) / 4);
+                const unsigned add1 = (unsigned)(a0[1] + ((a1[1] - a0[1]) * fx) / 4);
+                const unsigned add2 = (unsigned)(a0[2] + ((a1[2] - a0[2]) * fx) / 4);
+                r = r * trans / 255u + add0;
+                g = g * trans / 255u + add1;
+                b = b * trans / 255u + add2;
             }
         }
         if (warmth > 0u) {
@@ -513,25 +645,28 @@ static void render_water_row(uint32_t *out, const uint8_t *base, unsigned y,
         const unsigned px = x >> 1u;
         int shade = (int)wave_shade_row[px];
 
-        /* Per-pixel detail. Two noise layers scrolled in opposite senses so
-         * the pattern never visibly repeats; sampled finer toward the horizon
-         * (ripples are a fixed world size, so they shrink on screen with
-         * distance) and scaled by local energy -- the solver shade magnitude
-         * -- so a flat sea stays smooth and a working one shimmers. Foam
-         * pixels skip it; white water has its own texture. */
-        const unsigned energy = 20u + ((unsigned)(shade < 0 ? -shade : shade) >> 1);
-        const int freq = 4 - (taper_q8 * 3 >> 8);          /* 4 far, 1 near */
-        const unsigned n0 = ((((unsigned)x * freq + detail_scroll_x0) & (DETAIL_N - 1)) +
-                             ((((unsigned)y * freq + detail_scroll_y0) & (DETAIL_N - 1)) << 8));
-        const unsigned n1 = ((((unsigned)x * (freq + 1) + detail_scroll_x1) & (DETAIL_N - 1)) +
-                             ((((unsigned)y * (freq + 1) + detail_scroll_y1) & (DETAIL_N - 1)) << 8));
+        /* Per-pixel detail -- fine surface shimmer, deliberately subtle. Two
+         * earlier bugs made it read as "blocks of tint": near the camera the
+         * field was sampled 1:1 so a 256-tile texture repeated every 256 px in
+         * big diamonds, and its amplitude swamped the shade. Now it is sampled
+         * at a high fixed frequency (features a handful of pixels wide, so any
+         * repeat of the 512 field is fine texture, never blocks) from a larger
+         * field, and its amplitude is a small fraction of a shade level. Two
+         * layers at coprime-ish steps drift apart so nothing pulses. */
+        const unsigned energy = 12u + ((unsigned)(shade < 0 ? -shade : shade) >> 2);
+        const unsigned n0 = ((((unsigned)x * 5u + detail_scroll_x0) & (DETAIL_N - 1)) +
+                             ((((unsigned)y * 5u + detail_scroll_y0) & (DETAIL_N - 1)) << 9));
+        const unsigned n1 = ((((unsigned)x * 7u + detail_scroll_x1) & (DETAIL_N - 1)) +
+                             ((((unsigned)y * 7u + detail_scroll_y1) & (DETAIL_N - 1)) << 9));
         const int detail = detail_grad[n0] + (detail_grad[n1] >> 1);
-        shade += detail * (int)energy >> 7;
+        shade += detail * (int)energy >> 9;
 
-        int quantised = shade + 128 + (int)shade_dither[y & 3u][x & 3u] - 8;
+        int quantised = shade + 128;
         if (quantised < 0) quantised = 0;
         if (quantised > 255) quantised = 255;
         const unsigned si = (unsigned)quantised >> 4u;
+        const unsigned si2 = si < 15u ? si + 1u : si;   /* next shade grade */
+        const unsigned frac = (unsigned)quantised & 15u; /* blend fraction */
 
         int sx = (int)x + (wave_dx_row[px] * taper_q8 >> 8);
         if (sx < 0) sx = 0;
@@ -540,9 +675,15 @@ static void render_water_row(uint32_t *out, const uint8_t *base, unsigned y,
         if (sy < LUM_HORIZON) sy = LUM_HORIZON;
         if (sy >= LUM_HEIGHT) sy = LUM_HEIGHT - 1;
         src = base + ((size_t)sy * LUM_WIDTH + (size_t)sx) * 3u;
-        unsigned r = wave_color_lut[0][si][src[0]];
-        unsigned g = wave_color_lut[1][si][src[1]];
-        unsigned b = wave_color_lut[2][si][src[2]];
+        /* Interpolate between the two neighbouring shade grades by `frac`
+         * instead of snapping to one of 16 -- otherwise a smooth swell shows
+         * the level boundaries as broad flat tint bands. */
+        unsigned r = (wave_color_lut[0][si][src[0]] * (16u - frac) +
+                      wave_color_lut[0][si2][src[0]] * frac) >> 4;
+        unsigned g = (wave_color_lut[1][si][src[1]] * (16u - frac) +
+                      wave_color_lut[1][si2][src[1]] * frac) >> 4;
+        unsigned b = (wave_color_lut[2][si][src[2]] * (16u - frac) +
+                      wave_color_lut[2][si2][src[2]] * frac) >> 4;
 
         const unsigned sim_foam = wave_foam_row[px];
         if (sim_foam != 255u) {
@@ -589,15 +730,30 @@ void lum_render_frame(uint32_t *pixels, int stride_px, uint64_t elapsed_ms)
     const int shade_recip_q16 = total_weight > 0 ? 65536 / (total_weight * 4) : 0;
     const unsigned warmth = sunset_warmth_255();
 
-    /* Advance the two detail layers. The dominant one drifts shoreward (down
-     * screen, toward the viewer, as incoming ripples do); the second crosses
-     * it slowly so their interference never repeats. Speeds are in detail
-     * texels per second, kept small so the shimmer reads as capillary chop,
-     * not a scrolling texture. */
-    detail_scroll_y0 = (int)(elapsed_ms * 34u / 1000u);
-    detail_scroll_x0 = (int)(elapsed_ms * 7u / 1000u);
-    detail_scroll_y1 = (int)(elapsed_ms * 19u / 1000u);
-    detail_scroll_x1 = -(int)(elapsed_ms * 13u / 1000u);
+    /* Advance the two detail layers ALONG THE LIVE SWELL so the surface visibly
+     * drifts with the real conditions rather than on a fixed vector. The
+     * dominant component's from_deg, relative to the shore normal (90 deg, due
+     * east), sets the on-screen drift: shoreward is DOWN the frame (toward the
+     * viewer) and the alongshore part maps to screen-right for a swell from the
+     * south of east -- right for SE/S, left for NE/N, straight onshore for a
+     * due-east swell (see config/nubble-sea-projection.json: camera yaw 83 deg,
+     * so screen-right ~= south). Drift speed scales mildly with wave height.
+     * The second layer is nudged perpendicular so the interference never
+     * repeats (no scrolling-texture tiling). */
+    const int from_deg = conditions.wave_count > 0u ? conditions.waves[0].from_deg : 137;
+    const float rel = (float)(from_deg - 90) * (float)M_PI / 180.0f;
+    const float ux = sinf(rel);                 /* screen-right (alongshore) */
+    float uy = cosf(rel);                        /* screen-down (shoreward)  */
+    if (uy < 0.15f) uy = 0.15f;                  /* always some onshore march */
+    const float px = -uy, py = ux;               /* unit perpendicular       */
+    const int h_mm = conditions.wave_count > 0u ? (int)conditions.waves[0].height_mm : 800;
+    float spd = (float)h_mm / 1200.0f;           /* mild height scaling       */
+    if (spd < 0.5f) spd = 0.5f; else if (spd > 2.2f) spd = 2.2f;
+    const float e = (float)elapsed_ms / 1000.0f;
+    detail_scroll_x0 = (int)(e * spd * (34.0f * ux));
+    detail_scroll_y0 = (int)(e * spd * (34.0f * uy));
+    detail_scroll_x1 = (int)(e * spd * (22.0f * ux + 8.0f * px));
+    detail_scroll_y1 = (int)(e * spd * (22.0f * uy + 8.0f * py));
 
     int shift_x[3] = {0, 0, 0}, shift_y[3] = {0, 0, 0};
     if (conditions.cloud_cover_permille > 0u) {

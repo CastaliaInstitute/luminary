@@ -46,7 +46,10 @@ def main() -> None:
     # images are already the registered GOES camera projection; the firmware
     # treats their azimuth/elevation domain as a spherical shell and rotates
     # each atlas independently from its measured height-resolved wind.
-    cloud_width, cloud_height = 256, 96
+    # Full projection resolution (the crop below is exactly 1024x291), so the
+    # atlas is no longer downsampled to a coarse 256x96 grid whose ~8 px texels
+    # showed as sky seams/banding once stretched over the 2048-wide sky.
+    cloud_width, cloud_height = 1024, 291
     for name in ("low", "mid", "high"):
         source = args.cloud_dir / f"cloud-{name}-latest.png" if args.cloud_dir else None
         if source and source.exists():

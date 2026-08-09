@@ -106,6 +106,32 @@ Java_institute_castalia_luminary_LuminaryCore_nativeSolverTick(JNIEnv *env, jobj
     lum_solver_tick();
 }
 
+JNIEXPORT jlong JNICALL
+Java_institute_castalia_luminary_LuminaryCore_nativeCloudAtlasBytes(JNIEnv *env, jobject self)
+{
+    (void)env; (void)self;
+    return (jlong)lum_cloud_atlas_bytes();
+}
+
+JNIEXPORT void JNICALL
+Java_institute_castalia_luminary_LuminaryCore_nativeSetClouds(
+    JNIEnv *env, jobject self, jbyteArray low, jbyteArray mid, jbyteArray high)
+{
+    (void)self;
+    /* Only swap if every shell matches this build's atlas size; a stale bundle
+     * at the old resolution is skipped so the bundled atlas keeps rendering. */
+    const jsize need = (jsize)lum_cloud_atlas_bytes();
+    if (!low || !mid || !high ||
+        (*env)->GetArrayLength(env, low) != need ||
+        (*env)->GetArrayLength(env, mid) != need ||
+        (*env)->GetArrayLength(env, high) != need) {
+        return;
+    }
+    uint8_t *l = own(env, low), *m = own(env, mid), *h = own(env, high);
+    if (l && m && h) lum_set_clouds(l, m, h);
+    free(l); free(m); free(h);
+}
+
 JNIEXPORT void JNICALL
 Java_institute_castalia_luminary_LuminaryCore_nativeSetSurface(
     JNIEnv *env, jobject self, jobject surface)

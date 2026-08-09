@@ -13,6 +13,7 @@
 #ifndef LUMINARY_RENDER_CORE_H
 #define LUMINARY_RENDER_CORE_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -58,6 +59,16 @@ bool lum_init(const lum_assets_t *assets);
 
 /* Apply (possibly updated) scene conditions. Safe between frames. */
 void lum_set_conditions(const lum_conditions_t *conditions);
+
+/* Bytes expected in each raw cloud atlas (CLOUD_W*CLOUD_H*2), so the caller can
+ * validate a fetched atlas matches this build before swapping it in. */
+size_t lum_cloud_atlas_bytes(void);
+
+/* Hot-swap the three cloud atlases with freshly fetched ones (raw
+ * luminance/alpha, each lum_cloud_atlas_bytes() long). Re-softens them in place
+ * under the frame lock, so it is safe to call from a background thread while
+ * rendering. A NULL shell is left unchanged. */
+void lum_set_clouds(const uint8_t *low, const uint8_t *mid, const uint8_t *high);
 
 /* Advance the solver by one tick (call at ~20-30 Hz from its own thread;
  * internally locked against lum_render_frame). */

@@ -24,7 +24,8 @@ import kotlin.concurrent.thread
  */
 class MainActivity : Activity() {
     private lateinit var core: LuminaryCore
-    @Volatile private var running = false
+    @Volatile private var running = false      // solver/render loops; gated on the surface
+    @Volatile private var alive = false        // conditions loop; gated on the activity
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -129,17 +130,19 @@ class MainActivity : Activity() {
      *    conditions in place.
      */
     private fun startConditionsLoop() {
+        alive = true
         thread(name = "luminary-conditions") {
             val pollEveryMs = 10 * 60 * 1000L
             var lastPoll = 0L
-            while (running) {
+            // Gated on the activity, not the render surface: this loop advances
+            // the solar sky and polls live conditions even before the surface is
+            // created (the old `while (running)` raced surfaceCreated and exited
+            // immediately, so neither ran).
+            while (alive) {
                 val now = System.currentTimeMillis()
                 if (now - lastPoll >= pollEveryMs) {
                     lastPoll = now
-                    fetchLiveScene()?.let { fetched ->
-                        runOnUiThread { core.applyScene(fetched) }
-                        Log.i(TAG, "live conditions applied (buoy waves, cloud cover)")
-                    }
+                    pollLive()
                 }
                 // Re-apply the active scene every second so the solar clock
                 // advances the sky with no visible staleness -- unnecessarily
@@ -151,23 +154,55 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Fetch the live runtime bundle the P4 polls; null on any failure so the
-     * caller keeps the last good conditions. */
-    private fun fetchLiveScene(): JSONObject? = try {
-        val root = "https://raw.githubusercontent.com/CastaliaInstitute/luminary/" +
-            "runtime-live/site/runtime/v1"
-        val manifest = JSONObject(
-            (URL("$root/manifest.json").openConnection() as HttpURLConnection)
-                .apply { connectTimeout = 10000; readTimeout = 10000 }
-                .inputStream.bufferedReader().readText(),
-        )
-        val stateName = manifest.getJSONObject("assets")
-            .getJSONObject("state").getString("file")
-        JSONObject(URL("$root/$stateName").readText())
-    } catch (e: Exception) {
-        Log.w(TAG, "live fetch failed; keeping current conditions", e)
-        null
+    /** Fetch the live runtime bundle the P4 also consumes: state JSON (buoy
+     * waves, cloud cover, tide) AND the three GOES cloud atlases, hot-swapping
+     * the clouds so the sky tracks the real satellite -- not just a bundled
+     * snapshot. Any failure leaves the last good conditions in place. */
+    private fun pollLive() {
+        try {
+            val manifest = JSONObject(fetchText("$RUNTIME_ROOT/manifest.json"))
+            assetPath(manifest, "state")?.let { name ->
+                val scene = JSONObject(fetchText("$RUNTIME_ROOT/$name"))
+                runOnUiThread { core.applyScene(scene) }
+                Log.i(TAG, "live conditions applied (buoy waves, cloud cover)")
+            }
+            val low = assetPath(manifest, "cloud_low")
+            val mid = assetPath(manifest, "cloud_mid")
+            val high = assetPath(manifest, "cloud_high")
+            if (low != null && mid != null && high != null) {
+                val lo = fetchBytes("$RUNTIME_ROOT/$low")
+                val md = fetchBytes("$RUNTIME_ROOT/$mid")
+                val hi = fetchBytes("$RUNTIME_ROOT/$high")
+                val need = core.cloudAtlasBytes
+                if (lo.size.toLong() == need && md.size.toLong() == need &&
+                    hi.size.toLong() == need) {
+                    core.setClouds(lo, md, hi)          // thread-safe; locks natively
+                    Log.i(TAG, "live GOES cloud atlas applied (${lo.size} B/shell)")
+                } else {
+                    Log.w(TAG, "live cloud atlas is ${lo.size} B/shell, this build " +
+                        "expects $need; keeping bundled atlas")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "live fetch failed; keeping current conditions", e)
+        }
     }
+
+    /** Manifest asset path, tolerating either the "path" or "file" key. */
+    private fun assetPath(manifest: JSONObject, key: String): String? =
+        manifest.optJSONObject("assets")?.optJSONObject(key)?.let {
+            it.optString("path", it.optString("file", ""))
+        }?.takeIf { it.isNotEmpty() }
+
+    private fun fetchText(url: String): String =
+        (URL(url).openConnection() as HttpURLConnection)
+            .apply { connectTimeout = 10000; readTimeout = 10000 }
+            .inputStream.bufferedReader().use { it.readText() }
+
+    private fun fetchBytes(url: String): ByteArray =
+        (URL(url).openConnection() as HttpURLConnection)
+            .apply { connectTimeout = 15000; readTimeout = 30000 }
+            .inputStream.use { it.readBytes() }
 
     private fun hideSystemUi() {
         @Suppress("DEPRECATION")
@@ -180,10 +215,14 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         running = false
+        alive = false
         super.onDestroy()
     }
 
     companion object {
         private const val TAG = "luminary"
+        private const val RUNTIME_ROOT =
+            "https://raw.githubusercontent.com/CastaliaInstitute/luminary/" +
+                "runtime-live/site/runtime/v1"
     }
 }

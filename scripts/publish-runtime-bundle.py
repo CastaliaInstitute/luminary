@@ -31,12 +31,15 @@ def main() -> None:
         "cloud_mid": args.assets / "nubble_runtime_cloud_mid.bin",
         "cloud_low": args.assets / "nubble_runtime_cloud_low.bin",
         "ocean_phase": args.assets / "nubble_runtime_ocean_phase.bin",
+        "wave_cycle": args.assets / "nubble_runtime_wave_cycle.lumv",
         "state": args.state,
     }
-    expected = {"cloud_high": 49152, "cloud_mid": 49152, "cloud_low": 49152,
-                "ocean_phase": 512 * 300 * 3}
+    expected = {"cloud_high": 1024 * 291 * 2, "cloud_mid": 1024 * 291 * 2,
+                "cloud_low": 1024 * 291 * 2, "ocean_phase": 512 * 300 * 3}
     payloads: dict[str, bytes] = {}
     for name, source in sources.items():
+        if name == "wave_cycle" and not source.exists():
+            continue
         payload = source.read_bytes()
         if name in expected and len(payload) != expected[name]:
             raise ValueError(f"{name}: expected {expected[name]} bytes, got {len(payload)}")
