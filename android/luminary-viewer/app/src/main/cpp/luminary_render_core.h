@@ -28,6 +28,10 @@
 typedef struct {
     const uint8_t *base_rgb;        /* LUM_WIDTH*LUM_HEIGHT*3, RGB, decoded from the JPEG */
     const uint8_t *water_mask;      /* LUM_WIDTH*LUM_HEIGHT/8, LSB-first bits */
+    const uint8_t *land_mask;       /* LUM_WIDTH*LUM_HEIGHT/8: island, rocks,
+                                     * lighthouse, foreground -- the solid
+                                     * placeholder for the 3D print, passed
+                                     * through the photo untouched. */
     const uint8_t *shore_distance;  /* LUM_WIDTH*LUM_HEIGHT */
     const uint8_t *ocean_map;       /* 512*155 pairs of Q8.8 uint16 LE */
     const uint8_t *ocean_depth;     /* OCEAN_CELLS depth codes */

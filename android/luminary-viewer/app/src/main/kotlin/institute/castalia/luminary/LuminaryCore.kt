@@ -10,8 +10,8 @@ import org.json.JSONObject
 class LuminaryCore(private val assets: AssetManager) {
 
     external fun nativeInit(
-        baseRgb: ByteArray, waterMask: ByteArray, shore: ByteArray,
-        map: ByteArray, depth: ByteArray,
+        baseRgb: ByteArray, waterMask: ByteArray, landMask: ByteArray,
+        shore: ByteArray, map: ByteArray, depth: ByteArray,
         cloudLow: ByteArray, cloudMid: ByteArray, cloudHigh: ByteArray,
     ): Boolean
 
@@ -29,6 +29,7 @@ class LuminaryCore(private val assets: AssetManager) {
         val ok = nativeInit(
             decodeBaseRgb(),
             read("nubble_runtime_water_mask.bin"),
+            read("nubble_runtime_land_mask.bin"),
             read("nubble_runtime_shore_distance.bin"),
             read("nubble_runtime_ocean_map.bin"),
             read("nubble_runtime_ocean_depth.bin"),

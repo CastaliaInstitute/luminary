@@ -49,7 +49,13 @@ def main() -> None:
     w, h = WIDTH * scale, HEIGHT * scale
     DST.mkdir(parents=True, exist_ok=True)
 
-    Image.open(SRC / "nubble_runtime_base.jpg").resize((w, h), Image.LANCZOS).save(
+    # The Android build shows the whole scene -- island, rocks, lighthouse,
+    # sky -- so its base is the full registered photograph, not the P4's
+    # sky+water plate (the P4 prints the land physically). source-cropped is
+    # the same 1024x600 registration everything else is aligned to.
+    from PIL import Image as _Image
+    base = _Image.open(ROOT / "scenes/nubble-aligned/compiled/source-cropped.png")
+    base.convert("RGB").resize((w, h), _Image.LANCZOS).save(
         DST / "nubble_runtime_base.jpg", quality=95)
 
     bits = np.unpackbits(
@@ -64,6 +70,19 @@ def main() -> None:
     np.repeat(np.repeat(shore, scale, 0), scale, 1).tofile(
         DST / "nubble_runtime_shore_distance.bin")
 
+    # Land mask: the solid, pass-through parts of the photo -- the island and
+    # lighthouse (which rise above the horizon) plus the foreground rocks.
+    # Sky rows grade everything that is NOT land; below the horizon anything
+    # that is not water is land already, so this mask matters most for the
+    # island poking into the sky band. Bit-packed like the water mask.
+    comp = ROOT / "scenes/nubble-aligned/compiled"
+    island = np.array(Image.open(comp / "island-mask.png").convert("L")) > 128
+    foreground = np.array(Image.open(comp / "foreground-mask.png").convert("L")) > 128
+    land = island | foreground
+    land_big = np.repeat(np.repeat(land, scale, 0), scale, 1)
+    np.packbits(land_big.flatten(), bitorder="little").tofile(
+        DST / "nubble_runtime_land_mask.bin")
+
     # The phone's solver runs the 1 m (384x384) grid, so it needs that depth
     # field, not the P4's 192x192. The three cloud atlases stay
     # resolution-independent and ship from the firmware tree.
@@ -76,6 +95,18 @@ def main() -> None:
          "--scale", str(scale),
          "--output", str(DST / "nubble_runtime_ocean_map.bin")],
         check=True)
+
+    # Daytime offline-fallback scene: the wall piece cold-starts on a bright
+    # day rather than whatever the last live capture happened to be; the live
+    # fetch overrides within seconds where there is network.
+    import json as _json
+    scene = _json.load(open(
+        ROOT / "firmware/luminary-background-viewer/assets/v2/nubble-runtime-scene-v1.json"))
+    scene["sun"] = {"altitude_deg": 42.0, "azimuth_deg": 170.0,
+                    "off_screen": False, "state": "day", "visual_phase": "day"}
+    scene.setdefault("sky", {}).update({"r": 170, "g": 205, "b": 232})
+    scene.setdefault("clouds", {})["cover_fraction"] = 0.0
+    (DST / "nubble-runtime-scene-v1.json").write_text(_json.dumps(scene, indent=2))
 
     print(f"prepared {scale}x Android assets ({w}x{h}) in {DST}")
 

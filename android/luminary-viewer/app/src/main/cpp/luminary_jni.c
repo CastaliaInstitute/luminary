@@ -28,13 +28,14 @@ static uint8_t *own(JNIEnv *env, jbyteArray array)
 JNIEXPORT jboolean JNICALL
 Java_institute_castalia_luminary_LuminaryCore_nativeInit(
     JNIEnv *env, jobject self, jbyteArray base_rgb, jbyteArray water_mask,
-    jbyteArray shore, jbyteArray map, jbyteArray depth,
+    jbyteArray land_mask, jbyteArray shore, jbyteArray map, jbyteArray depth,
     jbyteArray cloud_low, jbyteArray cloud_mid, jbyteArray cloud_high)
 {
     (void)self;
     lum_assets_t assets = {
         .base_rgb = own(env, base_rgb),
         .water_mask = own(env, water_mask),
+        .land_mask = own(env, land_mask),
         .shore_distance = own(env, shore),
         .ocean_map = own(env, map),
         .ocean_depth = own(env, depth),
@@ -42,7 +43,8 @@ Java_institute_castalia_luminary_LuminaryCore_nativeInit(
         .cloud_mid = own(env, cloud_mid),
         .cloud_high = own(env, cloud_high),
     };
-    if (!assets.base_rgb || !assets.water_mask || !assets.shore_distance ||
+    if (!assets.base_rgb || !assets.water_mask || !assets.land_mask ||
+        !assets.shore_distance ||
         !assets.ocean_map || !assets.ocean_depth || !assets.cloud_low ||
         !assets.cloud_mid || !assets.cloud_high) {
         return JNI_FALSE;

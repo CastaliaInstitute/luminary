@@ -72,6 +72,15 @@ static inline bool water_pixel(size_t pixel)
     return (assets.water_mask[pixel >> 3] >> (pixel & 7u)) & 1u;
 }
 
+/* Island, rocks, lighthouse, foreground: solid, and only a placeholder here
+ * for the 3D-printed relief that will cover them. The renderer draws nothing
+ * over these -- the authored photograph passes through untouched -- so what
+ * shows is exactly what the print will replace. */
+static inline bool land_pixel(size_t pixel)
+{
+    return (assets.land_mask[pixel >> 3] >> (pixel & 7u)) & 1u;
+}
+
 static inline uint8_t clamp_channel(int v)
 {
     return (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v);
@@ -82,9 +91,77 @@ static inline uint8_t clamp_channel(int v)
 #define AUTHORED_SKY_G 208
 #define AUTHORED_SKY_B 228
 
+/* --- per-pixel surface detail -------------------------------------------
+ *
+ * The 1 m CFD grid carries the real motion -- shoaling, refraction,
+ * breaking -- but its finest wave is ~2 cells, a metre or two, and between
+ * those the surface is smooth. Real water is not: it carries capillary
+ * ripple far below any grid a solver can afford. This layer adds that back
+ * per pixel: a tileable multi-octave value-noise field, pre-differentiated
+ * in the shoreward direction so a sample reads as ripple shading, scrolled
+ * with the wind and scaled by the LOCAL wave energy the solver reports, so
+ * ripples live where the water actually moves and calm water stays glassy.
+ * It is not physics; it is the sub-grid detail the physics cannot resolve,
+ * driven by the physics so it never contradicts it. */
+#define DETAIL_N 256           /* power of two: wrap with & (DETAIL_N-1) */
+static int8_t detail_grad[DETAIL_N * DETAIL_N];
+/* Scroll offsets for two layers, set per frame in lum_render_frame. */
+static int detail_scroll_x0, detail_scroll_y0, detail_scroll_x1, detail_scroll_y1;
+
+static float detail_lattice_value(uint32_t x, uint32_t y, uint32_t period)
+{
+    /* Deterministic hash -> [-1,1], wrapped at `period` so every octave
+     * tiles seamlessly across the DETAIL_N field. */
+    uint32_t h = (x % period) * 374761393u + (y % period) * 668265263u;
+    h = (h ^ (h >> 13)) * 1274126177u;
+    return (float)(h & 0xFFFFu) / 32767.5f - 1.0f;
+}
+
+static float detail_octave(float u, float v, uint32_t period)
+{
+    const float fx = u * period, fy = v * period;
+    const uint32_t x0 = (uint32_t)fx, y0 = (uint32_t)fy;
+    const float tx = fx - x0, ty = fy - y0;
+    /* Smoothstep for C1 continuity across lattice cells. */
+    const float sx = tx * tx * (3.0f - 2.0f * tx);
+    const float sy = ty * ty * (3.0f - 2.0f * ty);
+    const float a = detail_lattice_value(x0, y0, period);
+    const float b = detail_lattice_value(x0 + 1, y0, period);
+    const float c = detail_lattice_value(x0, y0 + 1, period);
+    const float d = detail_lattice_value(x0 + 1, y0 + 1, period);
+    return (a + (b - a) * sx) + ((c + (d - c) * sx) - (a + (b - a) * sx)) * sy;
+}
+
+static void build_detail_field(void)
+{
+    /* Four octaves at tiling periods; height first, then the shoreward
+     * derivative baked to int8. */
+    static float height[DETAIL_N * DETAIL_N];
+    for (unsigned y = 0; y < DETAIL_N; ++y) {
+        for (unsigned x = 0; x < DETAIL_N; ++x) {
+            const float u = (float)x / DETAIL_N, v = (float)y / DETAIL_N;
+            float h = detail_octave(u, v, 8) * 0.55f +
+                      detail_octave(u, v, 16) * 0.28f +
+                      detail_octave(u, v, 32) * 0.13f +
+                      detail_octave(u, v, 64) * 0.06f;
+            height[y * DETAIL_N + x] = h;
+        }
+    }
+    for (unsigned y = 0; y < DETAIL_N; ++y) {
+        const unsigned ym = (y - 1) & (DETAIL_N - 1);
+        const unsigned yp = (y + 1) & (DETAIL_N - 1);
+        for (unsigned x = 0; x < DETAIL_N; ++x) {
+            const float g = (height[yp * DETAIL_N + x] - height[ym * DETAIL_N + x]) * 96.0f;
+            const int gi = (int)lrintf(g);
+            detail_grad[y * DETAIL_N + x] = (int8_t)(gi < -127 ? -127 : gi > 127 ? 127 : gi);
+        }
+    }
+}
+
 bool lum_init(const lum_assets_t *bound)
 {
     assets = *bound;
+    build_detail_field();
     for (unsigned i = 0; i < 256; ++i) {
         wave_sine[i] = (int8_t)lrintf(127.0f * sinf((float)i * 6.28318530718f / 256.0f));
     }
@@ -364,8 +441,17 @@ static void render_sky_row(uint32_t *out, const uint8_t *base_row, unsigned y,
         mode = conditions.sun_mode;
     }
 
+    const size_t row_pixel = (size_t)y * LUM_WIDTH;
     for (unsigned x = 0; x < LUM_WIDTH; ++x) {
         const uint8_t *src = base_row + (size_t)x * 3u;
+        // The island and lighthouse rise above the horizon into the sky band.
+        // They are solid placeholder for the print: pass the photo through
+        // untouched, no grading, no clouds.
+        if (land_pixel(row_pixel + x)) {
+            out[x] = 0xFF000000u | ((unsigned)src[2] << 16) |
+                     ((unsigned)src[1] << 8) | src[0];
+            continue;
+        }
         unsigned r = clamp_channel((int)src[0] + shift_r);
         unsigned g = clamp_channel((int)src[1] + shift_g);
         unsigned b = clamp_channel((int)src[2] + shift_b);
@@ -425,8 +511,24 @@ static void render_water_row(uint32_t *out, const uint8_t *base, unsigned y,
             continue;
         }
         const unsigned px = x >> 1u;
-        int quantised = (int)wave_shade_row[px] + 128 +
-                        (int)shade_dither[y & 3u][x & 3u] - 8;
+        int shade = (int)wave_shade_row[px];
+
+        /* Per-pixel detail. Two noise layers scrolled in opposite senses so
+         * the pattern never visibly repeats; sampled finer toward the horizon
+         * (ripples are a fixed world size, so they shrink on screen with
+         * distance) and scaled by local energy -- the solver shade magnitude
+         * -- so a flat sea stays smooth and a working one shimmers. Foam
+         * pixels skip it; white water has its own texture. */
+        const unsigned energy = 20u + ((unsigned)(shade < 0 ? -shade : shade) >> 1);
+        const int freq = 4 - (taper_q8 * 3 >> 8);          /* 4 far, 1 near */
+        const unsigned n0 = ((((unsigned)x * freq + detail_scroll_x0) & (DETAIL_N - 1)) +
+                             ((((unsigned)y * freq + detail_scroll_y0) & (DETAIL_N - 1)) << 8));
+        const unsigned n1 = ((((unsigned)x * (freq + 1) + detail_scroll_x1) & (DETAIL_N - 1)) +
+                             ((((unsigned)y * (freq + 1) + detail_scroll_y1) & (DETAIL_N - 1)) << 8));
+        const int detail = detail_grad[n0] + (detail_grad[n1] >> 1);
+        shade += detail * (int)energy >> 7;
+
+        int quantised = shade + 128 + (int)shade_dither[y & 3u][x & 3u] - 8;
         if (quantised < 0) quantised = 0;
         if (quantised > 255) quantised = 255;
         const unsigned si = (unsigned)quantised >> 4u;
@@ -486,6 +588,16 @@ void lum_render_frame(uint32_t *pixels, int stride_px, uint64_t elapsed_ms)
     build_wave_tables(elapsed_ms, &total_weight);
     const int shade_recip_q16 = total_weight > 0 ? 65536 / (total_weight * 4) : 0;
     const unsigned warmth = sunset_warmth_255();
+
+    /* Advance the two detail layers. The dominant one drifts shoreward (down
+     * screen, toward the viewer, as incoming ripples do); the second crosses
+     * it slowly so their interference never repeats. Speeds are in detail
+     * texels per second, kept small so the shimmer reads as capillary chop,
+     * not a scrolling texture. */
+    detail_scroll_y0 = (int)(elapsed_ms * 34u / 1000u);
+    detail_scroll_x0 = (int)(elapsed_ms * 7u / 1000u);
+    detail_scroll_y1 = (int)(elapsed_ms * 19u / 1000u);
+    detail_scroll_x1 = -(int)(elapsed_ms * 13u / 1000u);
 
     int shift_x[3] = {0, 0, 0}, shift_y[3] = {0, 0, 0};
     if (conditions.cloud_cover_permille > 0u) {
