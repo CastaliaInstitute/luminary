@@ -50,11 +50,14 @@ def main() -> None:
     DST.mkdir(parents=True, exist_ok=True)
 
     # The Android build shows the whole scene -- island, rocks, lighthouse,
-    # sky -- so its base is the full registered photograph, not the P4's
-    # sky+water plate (the P4 prints the land physically). source-cropped is
-    # the same 1024x600 registration everything else is aligned to.
+    # sky. The base is a newer, sharper Sohier Park photograph warped into the
+    # original scene's registration (ORB feature match, scale+translation only
+    # so verticals stay vertical, 374 inliers at 4.3 px RMS). Because it lands
+    # in the exact validated frame, every to-scale asset -- the water mask, the
+    # land mask, the sea-plane projection and its ocean map -- applies
+    # unchanged; only the photograph's pixels are newer.
     from PIL import Image as _Image
-    base = _Image.open(ROOT / "scenes/nubble-aligned/compiled/source-cropped.png")
+    base = _Image.open(ROOT / "scenes/nubble-aligned/compiled/nubble-c85-registered.png")
     base.convert("RGB").resize((w, h), _Image.LANCZOS).save(
         DST / "nubble_runtime_base.jpg", quality=95)
 

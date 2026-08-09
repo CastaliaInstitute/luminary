@@ -44,7 +44,7 @@ from scipy import ndimage, optimize
 Image.MAX_IMAGE_PIXELS = None
 
 ROOT = Path(__file__).resolve().parents[1]
-MASK = ROOT / "firmware/luminary-background-viewer/assets/runtime/nubble_runtime_water_mask.bin"
+MASK = ROOT / "firmware/luminary-background-viewer/assets/runtime/nubble_runtime_water_mask.bin"  # default; --mask overrides
 CUDEM = ROOT / "data/nubble/ncei19_n43x25_w070x75_2021v1.tif"
 
 WIDTH, HEIGHT, HORIZON = 1024, 600, 291
@@ -124,16 +124,25 @@ def island_waterline(mask: np.ndarray):
     if island_label == 0:
         raise SystemExit("no land blob touches the horizon; wrong mask?")
 
+    # The island and the foreground rocks can be one connected land mass, so
+    # the blob's per-column bottom is the foreground rock at the frame edge,
+    # not the island's shoreline. Take instead the FIRST land->water
+    # transition scanning down from the horizon: that is where the island
+    # proper meets the sea. Cap the search above the foreground-rock band so a
+    # near-camera rock waterline (also at sea level, but not on the CUDEM
+    # island shoreline) cannot masquerade as the island's.
+    cap = int(HORIZON + 0.62 * (HEIGHT - HORIZON))
     points = []
     island = labels == island_label
     for x in range(WIDTH):
-        ys = np.where(island[:, x])[0]
-        if ys.size == 0:
-            continue
-        bottom = ys.max()
-        # Require real water below, not another blob or the frame edge.
-        if bottom + 4 < HEIGHT and mask[bottom + 1 : bottom + 4, x].all():
-            points.append((x, bottom + 0.5))
+        col_land = island[:, x]
+        if not col_land[HORIZON:HORIZON + 24].any():
+            continue  # open-ocean column: no island here
+        r = HORIZON
+        while r < HEIGHT and not (mask[r, x] == 1):  # skip the island's land run
+            r += 1
+        if HORIZON < r <= cap and r + 3 < HEIGHT and mask[r:r + 3, x].all():
+            points.append((x, r - 0.5))
     return np.array(points, dtype=np.float64)
 
 
@@ -200,6 +209,11 @@ def sample_distance(field: np.ndarray, east: np.ndarray, north: np.ndarray,
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    global MASK, HORIZON, CX, CY
+    parser.add_argument("--mask", type=Path, default=None,
+                        help="water mask (1024x600 bit-packed); default runtime mask")
+    parser.add_argument("--horizon", type=int, default=None,
+                        help="sea horizon row; default 291")
     parser.add_argument("--water-level", type=float, default=0.0,
                         help="NAVD88 still-water level used for the shoreline")
     parser.add_argument("--output", type=Path,
@@ -207,6 +221,9 @@ def main() -> None:
     parser.add_argument("--diagnostic", type=Path,
                         default=ROOT / "scenes/nubble-aligned/compiled/sea-projection-fit.png")
     args = parser.parse_args()
+    if args.mask: MASK = args.mask
+    if args.horizon: HORIZON = args.horizon
+    CX, CY = (WIDTH - 1) / 2.0, (HEIGHT - 1) / 2.0
 
     mask = load_water_mask()
     land, d_to_land, d_to_water = load_land_raster(args.water_level)
