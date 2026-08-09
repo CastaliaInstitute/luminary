@@ -1,9 +1,9 @@
 {
   "grid": [
-    192,
-    192
+    384,
+    384
   ],
-  "dx_m": 2.0,
+  "dx_m": 1.0,
   "domain_m": [
     384.0,
     384.0
@@ -18,8 +18,8 @@
   ],
   "depth_max_mm": 30000,
   "water_level_navd88_m": 1.0,
-  "land_cells": 5898,
-  "water_cells": 30966,
+  "land_cells": 23484,
+  "water_cells": 123972,
   "depth_range_m": [
     0.0,
     19.58

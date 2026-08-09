@@ -40,9 +40,19 @@
  * interface sits in ~11 m of water east of the island and the domain fills.
  * The cost is the hot working set no longer fitting the P4's 128 KB L2
  * (h + h_prev + depth is now 184 KB). */
+/* Grid size is overridable at compile time so each platform picks its own
+ * resolution off the same algorithm. The P4 stays at 192x192 / 2 m (its L2
+ * and DIRAM cannot afford more); the Android build passes -DOCEAN_NX=384
+ * -DOCEAN_NY=384 for 1 m cells over the identical 384x384 m domain -- four
+ * times the cells, genuinely finer waves, and still CFL-stable at 33 ms
+ * because this nearshore domain tops out near 20 m depth. */
+#ifndef OCEAN_NX
 #define OCEAN_NX 192u
+#endif
+#ifndef OCEAN_NY
 #define OCEAN_NY 192u
-#define OCEAN_CELLS (OCEAN_NX * OCEAN_NY)
+#endif
+#define OCEAN_CELLS ((unsigned)OCEAN_NX * (unsigned)OCEAN_NY)
 
 /* Surface elevation is Q4.11: +/-16 m range, 1/2048 m (0.49 mm) resolution. */
 #define OCEAN_H_FRAC_BITS 11

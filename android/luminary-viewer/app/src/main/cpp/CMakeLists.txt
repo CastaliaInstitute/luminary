@@ -13,7 +13,11 @@ add_library(luminary_core SHARED
 )
 
 target_include_directories(luminary_core PRIVATE ${OCEAN_SIM_DIR})
-target_compile_options(luminary_core PRIVATE -O2 -Wall)
+# 1 m ocean grid over the 384x384 m domain -- 4x the P4's cell count. The
+# phone has the headroom the microcontroller did not; the solver algorithm
+# is unchanged, only its dimensions.
+target_compile_definitions(luminary_core PRIVATE OCEAN_NX=384u OCEAN_NY=384u)
+target_compile_options(luminary_core PRIVATE -O3 -Wall)
 
 find_library(log-lib log)
 find_library(android-lib android)

@@ -40,7 +40,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CUDEM = ROOT / "data/nubble/ncei19_n43x25_w070x75_2021v1.tif"
 
 # Solver grid, matching ocean_sim.h.
-NX, NY = 192, 192
+NX, NY = 192, 192  # overridable via --nx/--ny
 DEPTH_MAX_MM = 30000
 
 # Domain is anchored on Cape Neddick (Nubble) Light, a verifiable landmark.
@@ -78,8 +78,11 @@ def load_cudem():
 
 
 def main() -> None:
+    global NX, NY
     ap = argparse.ArgumentParser()
     ap.add_argument("--dx", type=float, default=2.0, help="cell size in metres")
+    ap.add_argument("--nx", type=int, default=None, help="grid columns")
+    ap.add_argument("--ny", type=int, default=None, help="grid rows")
     ap.add_argument("--water-level", type=float, default=0.0,
                     help="still-water elevation in NAVD88 metres")
     ap.add_argument("--offshore-start", type=float, default=OFFSHORE_START_M,
@@ -87,6 +90,8 @@ def main() -> None:
     ap.add_argument("--alongshore-start", type=float, default=ALONGSHORE_START_M)
     ap.add_argument("--output", type=Path, default=ROOT / "tools/ocean-sim")
     args = ap.parse_args()
+    if args.nx: NX = args.nx
+    if args.ny: NY = args.ny
 
     dem, lon0, lat0, dlon, dlat = load_cudem()
     print(f"CUDEM {dem.shape} upper-left {lat0:.6f},{lon0:.6f} step {dlat:.3e} deg")

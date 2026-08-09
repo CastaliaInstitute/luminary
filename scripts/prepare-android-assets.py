@@ -64,6 +64,13 @@ def main() -> None:
     np.repeat(np.repeat(shore, scale, 0), scale, 1).tofile(
         DST / "nubble_runtime_shore_distance.bin")
 
+    # The phone's solver runs the 1 m (384x384) grid, so it needs that depth
+    # field, not the P4's 192x192. The three cloud atlases stay
+    # resolution-independent and ship from the firmware tree.
+    import shutil
+    shutil.copyfile(ROOT / "tools/ocean-sim/nubble_depth_384x384.bin",
+                    DST / "nubble_runtime_ocean_depth.bin")
+
     subprocess.run(
         [sys.executable, str(ROOT / "scripts/build-ocean-screen-map.py"),
          "--scale", str(scale),

@@ -51,7 +51,6 @@ val syncSceneAssets by tasks.registering(Copy::class) {
         // Only the resolution-independent assets come from the firmware
         // tree; the four screen-space assets ship at 2x from scene-assets/.
         include(
-            "nubble_runtime_ocean_depth.bin",
             "nubble_runtime_cloud_low.bin",
             "nubble_runtime_cloud_mid.bin",
             "nubble_runtime_cloud_high.bin",

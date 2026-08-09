@@ -119,25 +119,31 @@ def main() -> None:
     iy = np.clip(np.rint(gy), 0, ny - 1).astype(np.int64)
 
     # Q8.8 coordinates, clamped so a bilinear +1 neighbour stays in range.
+    # cell*256+frac overflows uint16 once a grid dimension passes 255 (the
+    # 1 m Android grid is 384), so storage widens to uint32 there. The
+    # renderer picks the matching width from its compile-time OCEAN_NX.
+    map_dtype = np.uint32 if max(nx, ny) > 255 else np.uint16
+    sentinel = 0xFFFFFFFF if map_dtype is np.uint32 else SENTINEL
     gx_q = np.clip(np.nan_to_num(gx, nan=0.0) * 256.0, 0, (nx - 1) * 256 - 1)
     gy_q = np.clip(np.nan_to_num(gy, nan=0.0) * 256.0, 0, (ny - 1) * 256 - 1)
     gy_q = np.minimum(gy_q, (seaward_limit - 1) * 256 - 1)
-    grid = np.zeros((MAP_H, MAP_W, 2), dtype=np.uint16)
-    grid[..., 0] = np.where(inside, gx_q.astype(np.uint16), 0)
-    grid[..., 1] = np.where(inside, gy_q.astype(np.uint16), SENTINEL)
+    grid = np.zeros((MAP_H, MAP_W, 2), dtype=map_dtype)
+    grid[..., 0] = np.where(inside, gx_q, 0).astype(map_dtype)
+    grid[..., 1] = np.where(inside, gy_q, sentinel).astype(map_dtype)
 
     # A cell whose nearest solver cell is land gives the renderer nothing to
     # shade; hand those to the analytic path too. (They are almost all
     # covered by the printed relief anyway.)
-    mapped = grid[..., 1] != SENTINEL
+    mapped = grid[..., 1] != sentinel
     cell = (np.clip(np.rint(gy), 0, ny - 1).astype(np.int64) * nx +
             np.clip(np.rint(gx), 0, nx - 1).astype(np.int64))
     on_land = np.zeros_like(mapped)
     on_land[mapped] = depth.reshape(-1)[cell[mapped]] == 0
-    grid[..., 1][on_land] = SENTINEL
+    grid[..., 1][on_land] = sentinel
 
     grid.tofile(args.output)
-    print(f"wrote {args.output} ({grid.nbytes} bytes, {MAP_W}x{MAP_H} Q8.8 pairs)")
+    print(f"wrote {args.output} ({grid.nbytes} bytes, {MAP_W}x{MAP_H} "
+          f"Q8.8 pairs, {map_dtype().itemsize * 8}-bit)")
 
     # The coverage report reads the 1x runtime mask regardless of --scale
     # (only the map's sampling density changes with scale, not which screen
@@ -150,7 +156,7 @@ def main() -> None:
     row_stride = max(1, 600 * 2 // HEIGHT)
     water_half = mask[row0_1x : row0_1x + rows_1x : row_stride, ::col_stride] == 1
     water_half = water_half[:MAP_H, :MAP_W]
-    served = (grid[..., 1] != SENTINEL) & water_half[:grid.shape[0], :grid.shape[1]]
+    served = (grid[..., 1] != sentinel) & water_half[:grid.shape[0], :grid.shape[1]]
     print(f"solver serves {served.sum()} of {water_half.sum()} water cells "
           f"({served.sum() / water_half.sum() * 100.0:.1f}%); "
           f"the rest keep the sine-phase path")

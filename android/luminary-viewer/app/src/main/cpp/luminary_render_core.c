@@ -14,7 +14,17 @@
 #define OCEAN_MAP_W 1024
 #define OCEAN_MAP_ROW0 290
 #define OCEAN_MAP_ROWS 310
+/* The screen map stores Q8.8 solver coordinates. cell*256+frac overflows
+ * uint16 once the grid passes 255 cells (the 1 m grid is 384), so the map
+ * element widens with the grid -- build-ocean-screen-map.py writes the
+ * matching width off the same threshold. */
+#if OCEAN_NX > 255
+typedef uint32_t ocean_map_t;
+#define OCEAN_MAP_NONE 0xFFFFFFFFu
+#else
+typedef uint16_t ocean_map_t;
 #define OCEAN_MAP_NONE 0xFFFFu
+#endif
 #define CLOUD_W 256
 #define CLOUD_H 96
 #define SHELL_HIGH_M 6000
@@ -222,7 +232,7 @@ static void build_color_lut(void)
 
 /* ---- wave row from the solver (firmware: compute_wave_row_sim) */
 
-static void compute_wave_row(const uint16_t *map_row, int shade_recip_q16)
+static void compute_wave_row(const ocean_map_t *map_row, int shade_recip_q16)
 {
     for (unsigned px = 0; px < OCEAN_MAP_W; ++px) {
         const unsigned gx_q8 = map_row[px * 2u];
@@ -497,7 +507,7 @@ void lum_render_frame(uint32_t *pixels, int stride_px, uint64_t elapsed_ms)
     memcpy(foam_snapshot, sim_foam, OCEAN_CELLS);
     pthread_mutex_unlock(&sim_lock);
 
-    const uint16_t *map = (const uint16_t *)assets.ocean_map;
+    const ocean_map_t *map = (const ocean_map_t *)assets.ocean_map;
     for (unsigned y = 0; y < LUM_HEIGHT; ++y) {
         uint32_t *out = pixels + (size_t)y * stride_px;
         const uint8_t *base_row = assets.base_rgb + (size_t)y * LUM_WIDTH * 3u;
