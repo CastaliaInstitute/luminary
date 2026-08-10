@@ -2,34 +2,32 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-  <title>Luminary — live</title>
-  <meta name="description" content="Nubble Lighthouse, live: a real-time shallow-water ocean and GOES sky rendered from live conditions.">
-  <link rel="manifest" href="./manifest.webmanifest">
-  <meta name="theme-color" content="#05070c">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="apple-touch-icon" href="./icon-192.png">
-  <style>
-    html, body { margin: 0; height: 100%; background: #05070c; overflow: hidden; }
-    body { display: flex; align-items: center; justify-content: center; }
-    /* Backing store is 2048x1200; the element scales to fit (whole scene). */
-    #scene { width: 100vw; height: 100vh; object-fit: contain; display: block;
-             image-rendering: auto; }
-    #status {
-      position: fixed; inset: 0; display: flex; align-items: center;
-      justify-content: center; color: #7d8aa0; font: 14px/1.4 -apple-system,
-      system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase;
-      pointer-events: none; transition: opacity .6s;
-    }
-    body.running #status { opacity: 0; }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#182321">
+  <meta name="description" content="Luminary PWA shell for field controls and project access.">
+  <title>Luminary App | CastaliaInstitute</title>
+  <link rel="manifest" href="/app/manifest.webmanifest">
+  <link rel="stylesheet" href="/app/app.css">
+  <link rel="icon" href="/app/icon.svg">
 </head>
 <body>
-  <canvas id="scene"></canvas>
-  <div id="status">starting…</div>
-  <script src="./luminary_core.js"></script>
-  <script type="module" src="./luminary.js"></script>
+  <main>
+    <h1>Luminary</h1>
+    <p>This is the Luminary PWA shell at <code>/app</code>.</p>
+    <p>Use this surface for future app controls while keeping the existing project site at <a href="/">/</a>.</p>
+    <ul>
+      <li>Installable via browser prompt when supported.</li>
+      <li>Offline-capable shell through service worker.</li>
+      <li>Back to the live project site: <a href="/">Home</a>.</li>
+    </ul>
+  </main>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/app/sw.js').catch(() => {});
+      });
+    }
+  </script>
 </body>
 </html>
+

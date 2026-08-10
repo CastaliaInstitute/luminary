@@ -1,0 +1,40 @@
+:root {
+  --ink: #182321;
+  --bg: #f3f0e8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font: 16px/1.45 Georgia, "Times New Roman", serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+main {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 2.2rem 1.2rem;
+}
+
+h1 {
+  font-size: clamp(2rem, 6vw, 3rem);
+  margin: 0 0 1rem;
+}
+
+p, li {
+  color: #33403c;
+}
+
+a {
+  color: #33403c;
+}
+
+ul {
+  margin-top: 1rem;
+  padding-left: 1.2rem;
+}
+
