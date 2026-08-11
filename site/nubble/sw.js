@@ -1,4 +1,4 @@
-const CACHE = 'nubble-pwa-v3';
+const CACHE = 'nubble-pwa-v4';
 const SHELL = [
   '/nubble/',
   '/nubble/index.html',
@@ -25,9 +25,7 @@ self.addEventListener('activate', (event) => {
           .filter((key) => key.startsWith('nubble-pwa-') && key !== CACHE)
           .map((key) => caches.delete(key)),
       ))
-      .then(() => self.clients.claim())
-      .then(() => self.clients.matchAll({ type: 'window' }))
-      .then((clients) => Promise.all(clients.map((client) => client.navigate(client.url)))),
+      .then(() => self.clients.claim()),
   );
 });
 

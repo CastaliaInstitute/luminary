@@ -361,8 +361,14 @@
   window.addEventListener('offline', () => { offlineEl.hidden = false; });
 
   if ('serviceWorker' in navigator) {
+    let reloadingForUpdate = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloadingForUpdate) return;
+      reloadingForUpdate = true;
+      location.reload();
+    });
     window.addEventListener('load', async () => {
-      const registration = await navigator.serviceWorker.register('/nubble/sw.js?v=3', { updateViaCache: 'none' });
+      const registration = await navigator.serviceWorker.register('/nubble/sw.js?v=4', { updateViaCache: 'none' });
       registration.update();
     });
   }
