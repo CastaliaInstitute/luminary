@@ -18,19 +18,20 @@
   <main class="stage" aria-label="Nubble live sea and sky">
     <canvas id="scene" width="1024" height="600" aria-label="Animated Nubble sea and sky"></canvas>
 
-    <section class="hud" aria-live="polite">
+    <section class="hud is-hidden" aria-live="polite">
       <div>
         <p class="eyebrow">YORK, MAINE · LIVE</p>
         <p id="conditions">Loading local conditions…</p>
       </div>
       <div class="hud-actions">
         <button id="install" hidden>Install</button>
+        <button id="island-toggle" aria-pressed="false">Island</button>
         <button id="fullscreen" aria-label="Enter fullscreen">Fullscreen</button>
         <button id="hud-toggle" aria-label="Hide information">Hide</button>
       </div>
     </section>
 
-    <button id="show-hud" class="show-hud" hidden>Info</button>
+    <button id="show-hud" class="show-hud">Info</button>
     <div id="offline" class="offline" hidden>Offline · using last conditions</div>
   </main>
   <script src="/nubble/nubble.js" defer></script>

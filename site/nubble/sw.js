@@ -1,10 +1,11 @@
-const CACHE = 'nubble-pwa-v1';
+const CACHE = 'nubble-pwa-v3';
 const SHELL = [
   '/nubble/',
   '/nubble/index.html',
   '/nubble/nubble.css',
   '/nubble/nubble.js',
   '/nubble/nubble-ocean.jpg',
+  '/nubble/nubble-island.png',
   '/nubble/manifest.webmanifest',
   '/nubble/icons/icon.svg',
   '/nubble/icons/icon-192.png',
@@ -37,16 +38,19 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  const isAppCode = event.request.mode === 'navigate'
+    || /\.(?:js|css|json|webmanifest)$/.test(requestUrl.pathname);
+  const network = fetch(event.request, { cache: 'no-store' }).then((response) => {
+    if (response.ok) {
+      const copy = response.clone();
+      caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+    }
+    return response;
+  });
+
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const network = fetch(event.request).then((response) => {
-        if (response.ok) {
-          const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(event.request, copy));
-        }
-        return response;
-      });
-      return cached || network.catch(() => caches.match('/nubble/index.html'));
-    }),
+    isAppCode
+      ? network.catch(() => caches.match(event.request).then((cached) => cached || caches.match('/nubble/index.html')))
+      : caches.match(event.request).then((cached) => cached || network),
   );
 });

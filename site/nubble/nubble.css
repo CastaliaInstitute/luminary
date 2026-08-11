@@ -45,8 +45,9 @@ button:focus-visible {
 
 #scene {
   display: block;
-  width: min(100vw, 170.6667vh);
-  height: min(100vh, 58.59375vw);
+  width: 100vw;
+  height: 100vh;
+  object-fit: cover;
   background: #071725;
 }
 
@@ -103,6 +104,11 @@ button:focus-visible {
   position: fixed;
   top: max(1rem, env(safe-area-inset-top));
   right: max(1rem, env(safe-area-inset-right));
+}
+
+.hud button[aria-pressed="true"] {
+  border-color: rgb(255 255 255 / 0.9);
+  background: rgb(232 241 247 / 0.24);
 }
 
 .offline {

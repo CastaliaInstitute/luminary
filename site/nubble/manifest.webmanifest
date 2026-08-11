@@ -3,7 +3,7 @@
   "name": "Nubble Luminary",
   "short_name": "Nubble",
   "description": "A live, weather-aware sea and sky for the Nubble Luminary.",
-  "start_url": "/nubble/",
+  "start_url": "/nubble/?fullscreen=1",
   "scope": "/nubble/",
   "display": "fullscreen",
   "display_override": ["fullscreen", "standalone"],
