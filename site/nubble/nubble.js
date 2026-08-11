@@ -362,7 +362,7 @@
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', async () => {
-      const registration = await navigator.serviceWorker.register('/nubble/sw.js', { updateViaCache: 'none' });
+      const registration = await navigator.serviceWorker.register('/nubble/sw.js?v=3', { updateViaCache: 'none' });
       registration.update();
     });
   }

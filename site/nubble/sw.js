@@ -25,7 +25,9 @@ self.addEventListener('activate', (event) => {
           .filter((key) => key.startsWith('nubble-pwa-') && key !== CACHE)
           .map((key) => caches.delete(key)),
       ))
-      .then(() => self.clients.claim()),
+      .then(() => self.clients.claim())
+      .then(() => self.clients.matchAll({ type: 'window' }))
+      .then((clients) => Promise.all(clients.map((client) => client.navigate(client.url)))),
   );
 });
 
