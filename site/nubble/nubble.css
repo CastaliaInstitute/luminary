@@ -122,6 +122,16 @@ button:focus-visible {
   .stage {
     background: radial-gradient(circle at 50% 42%, #0a2235, #02070c 70%);
   }
+
+  #scene {
+    position: absolute;
+    width: 100vh;
+    height: 100vw;
+    max-width: none;
+    max-height: none;
+    transform: rotate(90deg);
+    transform-origin: center;
+  }
 }
 
 @media (max-width: 620px) {

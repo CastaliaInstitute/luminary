@@ -22,7 +22,7 @@
   const showButton = document.querySelector('#show-hud');
 
   const base = loadImage('/nubble/nubble-ocean.jpg');
-  const island = loadImage('/nubble/nubble-island.png?v=6');
+  const island = loadImage('/nubble/nubble-island.png?v=7');
   const hudRequested = params.get('hud') === '1' || params.get('debug') === '1';
   let islandVisible = params.get('island') !== '0';
   let deferredInstall = null;
@@ -366,7 +366,7 @@
       location.reload();
     });
     window.addEventListener('load', async () => {
-      const registration = await navigator.serviceWorker.register('/nubble/sw.js?v=6', { updateViaCache: 'none' });
+      const registration = await navigator.serviceWorker.register('/nubble/sw.js?v=7', { updateViaCache: 'none' });
       registration.update();
     });
   }
