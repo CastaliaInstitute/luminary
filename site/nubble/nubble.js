@@ -25,8 +25,8 @@
   const hideButton = document.querySelector('#hud-toggle');
   const showButton = document.querySelector('#show-hud');
 
-  const base = loadImage('/nubble/nubble-ocean-2x.jpg?v=8');
-  const island = loadImage('/nubble/nubble-land-2x.png?v=8');
+  const base = loadImage('/nubble/nubble-ocean-2x.jpg?v=9');
+  const island = loadImage('/nubble/nubble-land-2x.png?v=9');
   const hudRequested = params.get('hud') === '1' || params.get('debug') === '1';
   let islandVisible = params.get('island') !== '0';
   let deferredInstall = null;
@@ -377,7 +377,7 @@
       location.reload();
     });
     window.addEventListener('load', async () => {
-      const registration = await navigator.serviceWorker.register('/nubble/sw.js?v=8', { updateViaCache: 'none' });
+      const registration = await navigator.serviceWorker.register('/nubble/sw.js?v=9', { updateViaCache: 'none' });
       registration.update();
     });
   }

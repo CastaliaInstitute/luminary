@@ -1,4 +1,4 @@
-const CACHE = 'nubble-pwa-v8';
+const CACHE = 'nubble-pwa-v9';
 const SHELL = [
   '/nubble/',
   '/nubble/index.html',
