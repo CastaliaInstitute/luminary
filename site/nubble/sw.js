@@ -1,4 +1,4 @@
-const CACHE = 'nubble-pwa-v7';
+const CACHE = 'nubble-pwa-v8';
 const SHELL = [
   '/nubble/',
   '/nubble/index.html',
@@ -6,6 +6,8 @@ const SHELL = [
   '/nubble/nubble.js',
   '/nubble/nubble-ocean.jpg',
   '/nubble/nubble-island.png',
+  '/nubble/nubble-ocean-2x.jpg',
+  '/nubble/nubble-land-2x.png',
   '/nubble/manifest.webmanifest',
   '/nubble/icons/icon.svg',
   '/nubble/icons/icon-192.png',

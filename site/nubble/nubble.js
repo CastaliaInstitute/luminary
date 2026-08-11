@@ -4,6 +4,7 @@
   const WIDTH = 1024;
   const HEIGHT = 600;
   const HORIZON = 291;
+  const RENDER_SCALE = 2;
   const YORK = { latitude: 43.1637, longitude: -70.648 };
   const WEATHER_URL = 'https://api.weather.gov/gridpoints/GYX/64,33/forecast/hourly';
   const MARINE_URL = 'https://marine-api.open-meteo.com/v1/marine?latitude=43.165&longitude=-70.59&current=wave_height,wave_direction,wave_period,swell_wave_height,swell_wave_direction,swell_wave_period,wind_wave_height,wind_wave_direction,wind_wave_period&timezone=America%2FNew_York';
@@ -13,6 +14,9 @@
 
   const canvas = document.querySelector('#scene');
   const ctx = canvas.getContext('2d', { alpha: false });
+  ctx.setTransform(RENDER_SCALE, 0, 0, RENDER_SCALE, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   const conditionsEl = document.querySelector('#conditions');
   const offlineEl = document.querySelector('#offline');
   const hud = document.querySelector('.hud');
@@ -21,8 +25,8 @@
   const hideButton = document.querySelector('#hud-toggle');
   const showButton = document.querySelector('#show-hud');
 
-  const base = loadImage('/nubble/nubble-ocean.jpg');
-  const island = loadImage('/nubble/nubble-island.png?v=7');
+  const base = loadImage('/nubble/nubble-ocean-2x.jpg?v=8');
+  const island = loadImage('/nubble/nubble-land-2x.png?v=8');
   const hudRequested = params.get('hud') === '1' || params.get('debug') === '1';
   let islandVisible = params.get('island') !== '0';
   let deferredInstall = null;
@@ -187,14 +191,21 @@
     const direction = sea.waveDirectionDeg * Math.PI / 180;
     const directionX = Math.sin(direction);
     const phase = seconds * Math.PI * 2 / period;
+    const sourceScale = base.naturalWidth / WIDTH;
 
     for (let y = HORIZON; y < HEIGHT; y += 6) {
       const depth = (y - HORIZON) / (HEIGHT - HORIZON);
       const shift = Math.sin(phase + y * 0.043) * (0.8 + depth * 5.5) * heightScale
         + Math.sin(phase * 0.53 + y * 0.019) * depth * 3 * directionX;
-      ctx.drawImage(base, 0, y, WIDTH, 6, shift, y, WIDTH, 6);
-      if (shift > 0) ctx.drawImage(base, WIDTH - shift, y, shift, 6, 0, y, shift, 6);
-      if (shift < 0) ctx.drawImage(base, 0, y, -shift, 6, WIDTH + shift, y, -shift, 6);
+      ctx.drawImage(base, 0, y * sourceScale, WIDTH * sourceScale, 6 * sourceScale, shift, y, WIDTH, 6);
+      if (shift > 0) {
+        ctx.drawImage(base, (WIDTH - shift) * sourceScale, y * sourceScale,
+          shift * sourceScale, 6 * sourceScale, 0, y, shift, 6);
+      }
+      if (shift < 0) {
+        ctx.drawImage(base, 0, y * sourceScale, -shift * sourceScale, 6 * sourceScale,
+          WIDTH + shift, y, -shift, 6);
+      }
     }
 
     ctx.save();
@@ -366,7 +377,7 @@
       location.reload();
     });
     window.addEventListener('load', async () => {
-      const registration = await navigator.serviceWorker.register('/nubble/sw.js?v=7', { updateViaCache: 'none' });
+      const registration = await navigator.serviceWorker.register('/nubble/sw.js?v=8', { updateViaCache: 'none' });
       registration.update();
     });
   }
