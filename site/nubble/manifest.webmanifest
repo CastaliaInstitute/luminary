@@ -1,0 +1,28 @@
+{
+  "id": "/nubble/",
+  "name": "Nubble Luminary",
+  "short_name": "Nubble",
+  "description": "A live, weather-aware sea and sky for the Nubble Luminary.",
+  "start_url": "/nubble/",
+  "scope": "/nubble/",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#02070c",
+  "theme_color": "#071725",
+  "categories": ["weather", "entertainment", "lifestyle"],
+  "icons": [
+    {
+      "src": "/nubble/icons/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "/nubble/icons/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ]
+}

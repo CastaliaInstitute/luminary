@@ -1,0 +1,141 @@
+:root {
+  color-scheme: dark;
+  background: #02070c;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #02070c;
+}
+
+button {
+  appearance: none;
+  border: 1px solid rgb(255 255 255 / 0.35);
+  border-radius: 999px;
+  padding: 0.55rem 0.85rem;
+  color: #f7fbff;
+  background: rgb(4 14 23 / 0.58);
+  font: inherit;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+}
+
+button:hover,
+button:focus-visible {
+  border-color: rgb(255 255 255 / 0.75);
+  background: rgb(8 25 39 / 0.78);
+}
+
+.stage {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #02070c;
+}
+
+#scene {
+  display: block;
+  width: min(100vw, 170.6667vh);
+  height: min(100vh, 58.59375vw);
+  background: #071725;
+}
+
+.hud {
+  position: fixed;
+  top: max(1rem, env(safe-area-inset-top));
+  right: max(1rem, env(safe-area-inset-right));
+  left: max(1rem, env(safe-area-inset-left));
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 0.9rem;
+  color: #f5f9fc;
+  background: linear-gradient(120deg, rgb(3 12 20 / 0.64), rgb(4 18 30 / 0.28));
+  box-shadow: 0 0.5rem 2rem rgb(0 0 0 / 0.2);
+  backdrop-filter: blur(12px);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.hud.is-hidden {
+  opacity: 0;
+  transform: translateY(-1rem);
+  pointer-events: none;
+}
+
+.eyebrow,
+#conditions {
+  margin: 0;
+}
+
+.eyebrow {
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.15em;
+}
+
+#conditions {
+  margin-top: 0.2rem;
+  color: rgb(236 246 252 / 0.82);
+  font-size: 0.84rem;
+}
+
+.hud-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.show-hud {
+  position: fixed;
+  top: max(1rem, env(safe-area-inset-top));
+  right: max(1rem, env(safe-area-inset-right));
+}
+
+.offline {
+  position: fixed;
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  padding: 0.45rem 0.65rem;
+  border-radius: 999px;
+  color: #fff3d2;
+  background: rgb(65 40 5 / 0.72);
+  font-size: 0.75rem;
+  backdrop-filter: blur(10px);
+}
+
+@media (orientation: portrait) {
+  .stage {
+    background: radial-gradient(circle at 50% 42%, #0a2235, #02070c 70%);
+  }
+}
+
+@media (max-width: 620px) {
+  .hud {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .hud-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud {
+    transition: none;
+  }
+}

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Nubble Luminary">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4e9ad0"/>
+      <stop offset="1" stop-color="#c0ddeb"/>
+    </linearGradient>
+    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17476b"/>
+      <stop offset="1" stop-color="#061725"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="#061725"/>
+  <path d="M48 48h416v207H48z" fill="url(#sky)"/>
+  <path d="M48 255h416v209H48z" fill="url(#sea)"/>
+  <path d="M48 302c70-17 110 22 178 2s109-19 166 1 72 3 72 3v156H48z" fill="#0b2b42" opacity=".75"/>
+  <path d="M100 365c44-22 79-30 116-12 36 18 56-6 96-6 47 0 60 27 100 6" fill="none" stroke="#d7edf5" stroke-width="10" stroke-linecap="round" opacity=".8"/>
+  <path d="M185 312l44-33 67 7 44 31 24 67H151z" fill="#101719"/>
+  <path d="M251 203h34l7 112h-49z" fill="#f1eee5"/>
+  <path d="M241 203h54l-7-22h-40z" fill="#11181b"/>
+  <path d="M247 173h41v14h-41z" fill="#11181b"/>
+  <circle cx="268" cy="181" r="5" fill="#f7d879"/>
+</svg>
