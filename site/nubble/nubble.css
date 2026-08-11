@@ -106,11 +106,6 @@ button:focus-visible {
   right: max(1rem, env(safe-area-inset-right));
 }
 
-.hud button[aria-pressed="true"] {
-  border-color: rgb(255 255 255 / 0.9);
-  background: rgb(232 241 247 / 0.24);
-}
-
 .offline {
   position: fixed;
   right: max(1rem, env(safe-area-inset-right));

@@ -17,13 +17,12 @@
   const offlineEl = document.querySelector('#offline');
   const hud = document.querySelector('.hud');
   const installButton = document.querySelector('#install');
-  const islandButton = document.querySelector('#island-toggle');
   const fullscreenButton = document.querySelector('#fullscreen');
   const hideButton = document.querySelector('#hud-toggle');
   const showButton = document.querySelector('#show-hud');
 
   const base = loadImage('/nubble/nubble-ocean.jpg');
-  const island = loadImage('/nubble/nubble-island.png?v=5');
+  const island = loadImage('/nubble/nubble-island.png?v=6');
   const hudRequested = params.get('hud') === '1' || params.get('debug') === '1';
   let islandVisible = params.get('island') !== '0';
   let deferredInstall = null;
@@ -321,7 +320,6 @@
 
   function setIslandVisible(visible, updateUrl = true) {
     islandVisible = visible;
-    islandButton.setAttribute('aria-pressed', String(visible));
     if (!updateUrl) return;
     const next = new URL(location.href);
     if (visible) next.searchParams.delete('island');
@@ -348,7 +346,6 @@
     installButton.hidden = true;
   });
 
-  islandButton.addEventListener('click', () => setIslandVisible(!islandVisible));
   fullscreenButton.addEventListener('click', toggleFullscreen);
   hideButton.addEventListener('click', () => setHudVisible(false));
   showButton.addEventListener('click', () => setHudVisible(true));
@@ -369,7 +366,7 @@
       location.reload();
     });
     window.addEventListener('load', async () => {
-      const registration = await navigator.serviceWorker.register('/nubble/sw.js?v=5', { updateViaCache: 'none' });
+      const registration = await navigator.serviceWorker.register('/nubble/sw.js?v=6', { updateViaCache: 'none' });
       registration.update();
     });
   }
