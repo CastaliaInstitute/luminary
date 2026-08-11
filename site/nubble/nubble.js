@@ -23,9 +23,9 @@
   const showButton = document.querySelector('#show-hud');
 
   const base = loadImage('/nubble/nubble-ocean.jpg');
-  const island = loadImage('/nubble/nubble-island.png');
+  const island = loadImage('/nubble/nubble-island.png?v=5');
   const hudRequested = params.get('hud') === '1' || params.get('debug') === '1';
-  let islandVisible = params.get('island') === '1' || params.get('debug') === '1';
+  let islandVisible = params.get('island') !== '0';
   let deferredInstall = null;
   let startedAt = performance.now();
   let lastUpdated = null;
@@ -319,12 +319,13 @@
     showButton.hidden = !hudRequested || visible;
   }
 
-  function setIslandVisible(visible) {
+  function setIslandVisible(visible, updateUrl = true) {
     islandVisible = visible;
     islandButton.setAttribute('aria-pressed', String(visible));
+    if (!updateUrl) return;
     const next = new URL(location.href);
-    if (visible) next.searchParams.set('island', '1');
-    else next.searchParams.delete('island');
+    if (visible) next.searchParams.delete('island');
+    else next.searchParams.set('island', '0');
     history.replaceState(null, '', next);
   }
 
@@ -368,7 +369,7 @@
       location.reload();
     });
     window.addEventListener('load', async () => {
-      const registration = await navigator.serviceWorker.register('/nubble/sw.js?v=4', { updateViaCache: 'none' });
+      const registration = await navigator.serviceWorker.register('/nubble/sw.js?v=5', { updateViaCache: 'none' });
       registration.update();
     });
   }
@@ -380,7 +381,7 @@
   }
 
   base.addEventListener('load', () => { startedAt = performance.now(); });
-  setIslandVisible(islandVisible);
+  setIslandVisible(islandVisible, false);
   setHudVisible(hudRequested);
   updateConditions();
   refreshLiveData();
