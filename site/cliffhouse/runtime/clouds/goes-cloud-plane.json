@@ -1,0 +1,82 @@
+{
+  "schema": "luminary-goes-cloud-shells/v2",
+  "provider": "NOAA GOES-19 ABI L2 CMIPF channel 13 plus ABI L2 ACHA cloud-top height",
+  "source_keys": [
+    "ABI-L2-CMIPF/2026/224/05/OR_ABI-L2-CMIPF-M6C13_G19_s20262240550213_e20262240559533_c20262240559578.nc",
+    "ABI-L2-CMIPF/2026/224/06/OR_ABI-L2-CMIPF-M6C13_G19_s20262240600213_e20262240609532_c20262240609596.nc"
+  ],
+  "cloud_top_height_source": "ABI-L2-ACHAF/2026/224/05/OR_ABI-L2-ACHAF-M6_G19_s20262240550213_e20262240559521_c20262240602198.nc",
+  "source_times_utc": [
+    "2026-08-12T05:50:21+00:00",
+    "2026-08-12T06:00:21+00:00"
+  ],
+  "camera": {
+    "latitude": 43.22205,
+    "longitude": -70.57435,
+    "bearing_deg": 250.0,
+    "horizon_y_px": 291,
+    "width": 1024,
+    "height": 600
+  },
+  "cloud_shells": [
+    {
+      "name": "low",
+      "height_range_m": [
+        0.0,
+        3250.0
+      ],
+      "projection_height_m": 2000.0,
+      "wind_scale": 1.0,
+      "wind_source": "GOES Derived Motion Winds (51 quality vectors)",
+      "wind_from_deg": 305.27,
+      "wind_knots": 17.76,
+      "height_source": "GOES ACHA measured cloud-top height"
+    },
+    {
+      "name": "mid",
+      "height_range_m": [
+        3250.0,
+        6500.0
+      ],
+      "projection_height_m": 5000.0,
+      "wind_scale": 1.0,
+      "wind_source": "GOES Derived Motion Winds (48 quality vectors)",
+      "wind_from_deg": 283.99,
+      "wind_knots": 19.26,
+      "height_source": "GOES ACHA measured cloud-top height"
+    },
+    {
+      "name": "high",
+      "height_range_m": [
+        6500.0,
+        21000.0
+      ],
+      "projection_height_m": 10000.0,
+      "wind_scale": 1.0,
+      "wind_source": "GOES Derived Motion Winds (89 quality vectors)",
+      "wind_from_deg": 264.71,
+      "wind_knots": 65.89,
+      "height_source": "GOES ACHA measured cloud-top height"
+    }
+  ],
+  "motion": {
+    "older_to_latest_px": [
+      0.0,
+      0.0
+    ],
+    "phase_correlation_confidence": 741.71069,
+    "loop_driver": "York wind advects the latest GOES cloud field between satellite refreshes",
+    "wind_from_deg": 270.0,
+    "wind_to_deg": 90.0,
+    "wind_knots": 8.0,
+    "loop_seconds": 60.0,
+    "frame_count": 6
+  },
+  "outputs": {
+    "older": "cloud-older.png",
+    "latest": "cloud-latest.png",
+    "combined_frames": "cloud-frame-000.png \u2026 cloud-frame-005.png",
+    "shell_frames": "cloud-{low,mid,high}-frame-000.png \u2026 frame-005.png"
+  },
+  "horizon_rule": "alpha is zero at and below y=284; satellite clouds cannot move the registered sea/sky horizon."
+}

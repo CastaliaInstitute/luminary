@@ -1,0 +1,15 @@
+:root { color-scheme: dark; background: #02070c; }
+* { box-sizing: border-box; }
+html, body, .stage { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #02070c; }
+.stage { position: fixed; inset: 0; display: grid; place-items: center; }
+#scene { display: block; width: 100vw; height: 100vh; background: #071725; }
+.hud, .offline {
+  position: fixed; z-index: 2; color: #f3f8fb; background: rgb(3 12 20 / 0.68);
+  border: 1px solid rgb(255 255 255 / 0.16); border-radius: .75rem;
+  padding: .6rem .75rem; font: 12px/1.35 system-ui, sans-serif; backdrop-filter: blur(10px);
+}
+.hud { top: max(.75rem, env(safe-area-inset-top)); left: max(.75rem, env(safe-area-inset-left)); display: grid; gap: .12rem; }
+.offline { right: max(.75rem, env(safe-area-inset-right)); bottom: max(.75rem, env(safe-area-inset-bottom)); }
+@media (orientation: portrait) {
+  #scene { position: absolute; width: 100vh; height: 100vw; transform: rotate(90deg); transform-origin: center; }
+}

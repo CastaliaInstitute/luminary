@@ -1,0 +1,14 @@
+{
+  "id": "/cliffhouse/",
+  "name": "Cliff House Luminary",
+  "short_name": "Cliff House",
+  "description": "Live weather-aware sea and sky for the Cliff House Luminary.",
+  "start_url": "/cliffhouse/?fullscreen=1",
+  "scope": "/cliffhouse/",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#02070c",
+  "theme_color": "#06131d",
+  "categories": ["weather", "entertainment", "lifestyle"]
+}
