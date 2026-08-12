@@ -290,10 +290,11 @@ async function refreshLive() {
 
 async function loadMeasuredClouds() {
   try {
-    const metadata = await json('./runtime/clouds/goes-cloud-plane.json');
+    const metadata = await json(`./runtime/clouds/goes-cloud-plane.json?t=${Date.now()}`);
     const count = Math.min(12, metadata.motion?.frame_count || 0);
+    const generation = encodeURIComponent(metadata.source_times_utc?.at(-1) || Date.now());
     const frames = await Promise.all(Array.from({ length: count }, (_, i) =>
-      image(`./runtime/clouds/cloud-frame-${String(i).padStart(3, '0')}.png`)));
+      image(`./runtime/clouds/cloud-frame-${String(i).padStart(3, '0')}.png?v=${generation}`)));
     measuredCloudFrames = frames;
     measuredCloudMaps = frames.map((frame) => {
       const sample = new OffscreenCanvas(64, 32);

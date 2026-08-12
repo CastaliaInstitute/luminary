@@ -1,0 +1,28 @@
+{
+  "location": {
+    "name": "Cliff House Maine / Bald Head Cliff",
+    "latitude": 43.2206648,
+    "longitude": -70.5795506,
+    "timezone": "America/New_York"
+  },
+  "camera": {
+    "latitude": 43.22205,
+    "longitude": -70.57435,
+    "bearing_deg_true": 250,
+    "horizon_y_px": 506,
+    "width_px": 2600,
+    "height_px": 1200
+  },
+  "nws": {
+    "hourly_forecast_url": "https://api.weather.gov/gridpoints/GYX/65,36/forecast/hourly",
+    "preferred_observation_station": "KPSM"
+  },
+  "ocean": {
+    "wave_station": "44098",
+    "wave_url": "https://www.ndbc.noaa.gov/data/realtime2/44098.txt",
+    "wave_spec_url": "https://www.ndbc.noaa.gov/data/realtime2/44098.spec",
+    "tide_station": "8419317",
+    "tide_url_template": "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?begin_date={begin_date}&end_date={end_date}&station=8419317&product=predictions&datum=MLLW&time_zone=lst_ldt&units=metric&interval=hilo&application=luminary&format=json"
+  },
+  "fallback": "cached weather and last measured GOES cloud shells"
+}

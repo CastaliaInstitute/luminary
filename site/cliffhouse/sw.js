@@ -1,4 +1,4 @@
-const CACHE = 'cliff-house-luminary-v2';
+const CACHE = 'cliff-house-luminary-v3';
 const SHELL = [
   './', './index.html', './cliff-house.css', './cliff-house.js', './solar.js',
   './manifest.webmanifest', './assets/registration.json',

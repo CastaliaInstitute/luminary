@@ -1,8 +1,8 @@
 {
   "average_period_s": 3.9,
-  "background_loop": "night-overcast-calm-sea-v1",
+  "background_loop": "night-clear-calm-sea-v1",
   "degraded_sources": [],
-  "forecast_precipitation_probability": 0,
+  "forecast_precipitation_probability": 14,
   "forecast_summary": "Partly Cloudy",
   "is_daytime": false,
   "location": {
@@ -11,26 +11,26 @@
     "name": "Cliff House Maine / Bald Head Cliff",
     "timezone": "America/New_York"
   },
-  "mean_wave_direction_deg": 147.0,
-  "observed_at": "2026-08-12T05:55:00+00:00",
-  "observed_at_utc": "2026-08-12T05:30:00Z",
+  "mean_wave_direction_deg": 118.0,
+  "observed_at": "2026-08-12T21:55:00+00:00",
+  "observed_at_utc": "2026-08-12T22:00:00Z",
   "precipitation": "none",
-  "sky": "overcast",
+  "sky": "clear",
   "sources": {
     "observation": "KPSM",
     "tide_proxy": "8419317",
     "wave_partition": "https://www.ndbc.noaa.gov/data/realtime2/44098.spec",
     "wave_proxy": "44098"
   },
-  "temperature_c": 21,
+  "temperature_c": 27.8,
   "tide": {
-    "next_event": "low",
-    "next_event_at": "2026-08-12T05:08:00-04:00",
-    "next_event_height_m": -0.254,
-    "phase": "ebbing",
+    "next_event": "high",
+    "next_event_at": "2026-08-12T23:43:00-04:00",
+    "next_event_height_m": 3.295,
+    "phase": "flooding",
     "previous_event": "low"
   },
-  "updated_at": "2026-08-12T06:12:18.342475Z",
+  "updated_at": "2026-08-12T22:37:56.639062Z",
   "visibility_m": 16090,
   "wave_components": [
     {
@@ -44,12 +44,12 @@
       "direction_label": "SSE",
       "height_m": 0.3,
       "name": "wind_wave",
-      "period_s": 5.6,
+      "period_s": 6.1,
       "wave_from_deg": 157.5
     }
   ],
   "wave_height_m": 0.4,
-  "wave_period_s": 6.0,
-  "wind_direction_deg": 0,
-  "wind_knots": 0.0
+  "wave_period_s": 14.0,
+  "wind_direction_deg": 270,
+  "wind_knots": 25.2
 }

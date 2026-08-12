@@ -32,14 +32,17 @@ jobs:
       - name: Build autonomous client bundle
         run: python scripts/publish-runtime-bundle.py
 
+      - name: Build live Cliff House web runtime
+        run: python scripts/update-cliffhouse-web-runtime.py
+
       - name: Publish immutable runtime branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          runtime_index="$(mktemp)"
-          rm "$runtime_index"
+          runtime_dir="$(mktemp -d)"
+          runtime_index="$runtime_dir/index"
           GIT_INDEX_FILE="$runtime_index" git read-tree --empty
-          GIT_INDEX_FILE="$runtime_index" git add -f site/runtime/v1
+          GIT_INDEX_FILE="$runtime_index" git add -f site/runtime/v1 site/cliffhouse/runtime
           runtime_tree="$(GIT_INDEX_FILE="$runtime_index" git write-tree)"
           runtime_commit="$(printf '%s\n' 'Publish live Luminary runtime' | git commit-tree "$runtime_tree")"
           git push --force origin "$runtime_commit:refs/heads/runtime-live"
