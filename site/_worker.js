@@ -1,5 +1,5 @@
 const LIVE_PREFIX = '/cliffhouse/runtime/';
-const LIVE_ORIGIN = 'https://raw.githubusercontent.com/CastaliaInstitute/luminary/runtime-live/';
+const LIVE_ORIGIN = 'https://raw.githubusercontent.com/CastaliaInstitute/luminary/runtime-live/site/';
 
 export default {
   async fetch(request, env) {
