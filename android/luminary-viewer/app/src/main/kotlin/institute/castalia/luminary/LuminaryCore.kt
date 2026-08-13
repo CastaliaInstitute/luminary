@@ -3,7 +3,9 @@ package institute.castalia.luminary
 import android.content.res.AssetManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.util.Log
 import android.view.Surface
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** Kotlin face of the native core: asset loading, scene state, frame loop. */
@@ -63,8 +65,16 @@ class LuminaryCore(private val assets: AssetManager) {
      * fallback, and the caller may re-apply a freshly fetched one. */
     fun applyScene(scene: JSONObject) {
         activeScene = scene
-        val sky = scene.optJSONObject("sky_color") ?: scene.optJSONObject("sky") ?: JSONObject()
-        val clouds = scene.optJSONObject("clouds") ?: JSONObject()
+        val sky = scene.optJSONObject("sky") ?: JSONObject()
+        val legacySky = scene.optJSONObject("sky_color") ?: JSONObject()
+        val palette = sky.optJSONArray("palette_rgb")
+        val skyR = palette.channel(0, legacySky.optInt("r", 168))
+        val skyG = palette.channel(1, legacySky.optInt("g", 208))
+        val skyB = palette.channel(2, legacySky.optInt("b", 228))
+        // Runtime v1 nests cloud cover and shells under `sky`; older bundles
+        // used a top-level `clouds` object. Accept both without silently
+        // dropping live GOES conditions.
+        val clouds = scene.optJSONObject("clouds") ?: sky
         val ocean = scene.optJSONObject("ocean") ?: JSONObject()
 
         val waves = ArrayList<Int>()
@@ -87,17 +97,34 @@ class LuminaryCore(private val assets: AssetManager) {
         // Shell winds: the state JSON carries measured winds per shell where
         // available; height/bias defaults mirror the firmware's.
         val shellDefaults = listOf(
-            Pair(6000, 14), Pair(3000, 9), Pair(1200, 4),
+            Triple("high", 10000, 14),
+            Triple("mid", 5000, 9),
+            Triple("low", 2000, 4),
         )
         val shells = ArrayList<Int>()
         val shellArray = clouds.optJSONArray("shells")
-        for (s in 0 until 3) {
-            val shell = shellArray?.optJSONObject(s)
-            shells.add(((shell?.optDouble("wind_east_mps", 4.0) ?: 4.0) * 1000).toInt())
-            shells.add(((shell?.optDouble("wind_north_mps", 2.0) ?: 2.0) * 1000).toInt())
-            shells.add(shell?.optInt("height_m", shellDefaults[s].first)
-                ?: shellDefaults[s].first)
-            shells.add(shellDefaults[s].second)
+        val shellsByName = (0 until (shellArray?.length() ?: 0))
+            .mapNotNull { shellArray?.optJSONObject(it) }
+            .associateBy { it.optString("name").lowercase() }
+        for ((name, defaultHeight, blueBias) in shellDefaults) {
+            val shell = shellsByName[name]
+            val advection = shell?.optJSONObject("advection")
+            val east = shell?.optDouble(
+                "wind_east_mps",
+                advection?.optDouble("east_mps", 4.0) ?: 4.0,
+            ) ?: 4.0
+            val north = shell?.optDouble(
+                "wind_north_mps",
+                advection?.optDouble("north_mps", 2.0) ?: 2.0,
+            ) ?: 2.0
+            val height = shell?.optInt(
+                "height_m",
+                shell.optInt("projection_height_m", defaultHeight),
+            ) ?: defaultHeight
+            shells.add((east * 1000).toInt())
+            shells.add((north * 1000).toInt())
+            shells.add(height)
+            shells.add(blueBias)
         }
 
         // Sun is computed from the device clock for York, so the sky tracks
@@ -114,14 +141,28 @@ class LuminaryCore(private val assets: AssetManager) {
         // Bearing from shore is due east (90 deg); relative azimuth drives the
         // side-weighted golden-hour glow.
         nativeSetConditions(
-            sky.optInt("r", 168), sky.optInt("g", 208), sky.optInt("b", 228),
+            skyR, skyG, skyB,
             sunMode, altitudeDeci,
             ((solar.azimuthDeg - 90.0) * 10).toInt(),
-            (clouds.optDouble("cover_fraction",
-                scene.optDouble("cloud_cover", 0.0)) * 1000).toInt(),
+            (clouds.optDouble(
+                "observed_cloud_fraction",
+                clouds.optDouble(
+                    "cover_fraction",
+                    scene.optDouble("cloud_cover", 0.0),
+                ),
+            ).coerceIn(0.0, 1.0) * 1000).toInt(),
             waves.toIntArray(), shells.toIntArray(),
         )
+        Log.i(
+            TAG,
+            "conditions: sky=$skyR,$skyG,$skyB " +
+                "cloud=${clouds.optDouble("observed_cloud_fraction", clouds.optDouble("cover_fraction", 0.0))} " +
+                "waves=${waves.size / 3} shells=${shellsByName.keys.sorted()}",
+        )
     }
+
+    private fun JSONArray?.channel(index: Int, fallback: Int): Int =
+        this?.optInt(index, fallback)?.coerceIn(0, 255) ?: fallback
 
     private fun read(name: String): ByteArray =
         assets.open(name).use { it.readBytes() }
@@ -148,6 +189,8 @@ class LuminaryCore(private val assets: AssetManager) {
     }
 
     companion object {
+        private const val TAG = "luminary"
+
         init {
             System.loadLibrary("luminary_core")
         }

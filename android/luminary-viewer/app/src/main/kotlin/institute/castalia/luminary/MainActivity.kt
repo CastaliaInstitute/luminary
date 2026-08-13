@@ -132,7 +132,7 @@ class MainActivity : Activity() {
     private fun startConditionsLoop() {
         alive = true
         thread(name = "luminary-conditions") {
-            val pollEveryMs = 10 * 60 * 1000L
+            val pollEveryMs = 5 * 60 * 1000L
             var lastPoll = 0L
             // Gated on the activity, not the render surface: this loop advances
             // the solar sky and polls live conditions even before the surface is
@@ -160,19 +160,31 @@ class MainActivity : Activity() {
      * snapshot. Any failure leaves the last good conditions in place. */
     private fun pollLive() {
         try {
-            val manifest = JSONObject(fetchText("$RUNTIME_ROOT/manifest.json"))
+            // runtime-live is force-updated with each measured bundle. Raw
+            // GitHub may cache that mutable branch URL long after the ref has
+            // moved, so resolve the current commit first and fetch the entire
+            // bundle through its immutable SHA.
+            val branch = JSONObject(fetchText(RUNTIME_BRANCH_API))
+            val runtimeSha = branch.getJSONObject("commit").getString("sha")
+            val runtimeRoot = "$RAW_ROOT/$runtimeSha/site/runtime/v1"
+            val manifest = JSONObject(fetchText("$runtimeRoot/manifest.json"))
             assetPath(manifest, "state")?.let { name ->
-                val scene = JSONObject(fetchText("$RUNTIME_ROOT/$name"))
+                val scene = JSONObject(fetchText("$runtimeRoot/$name"))
                 runOnUiThread { core.applyScene(scene) }
-                Log.i(TAG, "live conditions applied (buoy waves, cloud cover)")
+                Log.i(
+                    TAG,
+                    "live conditions applied " +
+                        "bundle=${manifest.optString("bundle_id")} " +
+                        "sha=${runtimeSha.take(12)}",
+                )
             }
             val low = assetPath(manifest, "cloud_low")
             val mid = assetPath(manifest, "cloud_mid")
             val high = assetPath(manifest, "cloud_high")
             if (low != null && mid != null && high != null) {
-                val lo = fetchBytes("$RUNTIME_ROOT/$low")
-                val md = fetchBytes("$RUNTIME_ROOT/$mid")
-                val hi = fetchBytes("$RUNTIME_ROOT/$high")
+                val lo = fetchBytes("$runtimeRoot/$low")
+                val md = fetchBytes("$runtimeRoot/$mid")
+                val hi = fetchBytes("$runtimeRoot/$high")
                 val need = core.cloudAtlasBytes
                 if (lo.size.toLong() == need && md.size.toLong() == need &&
                     hi.size.toLong() == need) {
@@ -196,12 +208,21 @@ class MainActivity : Activity() {
 
     private fun fetchText(url: String): String =
         (URL(url).openConnection() as HttpURLConnection)
-            .apply { connectTimeout = 10000; readTimeout = 10000 }
+            .apply {
+                connectTimeout = 10000
+                readTimeout = 10000
+                setRequestProperty("User-Agent", "Luminary-Android/1.0")
+                setRequestProperty("Cache-Control", "no-cache")
+            }
             .inputStream.bufferedReader().use { it.readText() }
 
     private fun fetchBytes(url: String): ByteArray =
         (URL(url).openConnection() as HttpURLConnection)
-            .apply { connectTimeout = 15000; readTimeout = 30000 }
+            .apply {
+                connectTimeout = 15000
+                readTimeout = 30000
+                setRequestProperty("User-Agent", "Luminary-Android/1.0")
+            }
             .inputStream.use { it.readBytes() }
 
     private fun hideSystemUi() {
@@ -221,8 +242,10 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG = "luminary"
-        private const val RUNTIME_ROOT =
-            "https://raw.githubusercontent.com/CastaliaInstitute/luminary/" +
-                "runtime-live/site/runtime/v1"
+        private const val RUNTIME_BRANCH_API =
+            "https://api.github.com/repos/CastaliaInstitute/luminary/" +
+                "branches/runtime-live"
+        private const val RAW_ROOT =
+            "https://raw.githubusercontent.com/CastaliaInstitute/luminary"
     }
 }
