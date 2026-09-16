@@ -1,0 +1,125 @@
+{
+  "schema": "luminary-runtime-scene/v1",
+  "updated_at": "2026-09-16T01:34:18.914861Z",
+  "camera": {
+    "width_px": 1024,
+    "height_px": 600,
+    "horizon_y_px": 291,
+    "bearing_deg": 90.0,
+    "locked": true,
+    "vertical_motion": "forbidden"
+  },
+  "sky": {
+    "palette_rgb": [
+      145,
+      190,
+      220
+    ],
+    "observed_cloud_fraction": 1.0,
+    "visibility_confidence": 0.0,
+    "shells": [
+      {
+        "name": "low",
+        "height_range_m": [
+          0.0,
+          3250.0
+        ],
+        "projection_height_m": 2000.0,
+        "wind_from_deg": 50.25,
+        "wind_speed_mps": 5.7669,
+        "advection": {
+          "east_mps": -4.4338,
+          "north_mps": -3.6876
+        },
+        "wind_source": "GOES Derived Motion Winds (119 quality vectors)",
+        "texture": "cloud-low-latest.png"
+      },
+      {
+        "name": "mid",
+        "height_range_m": [
+          3250.0,
+          6500.0
+        ],
+        "projection_height_m": 5000.0,
+        "wind_from_deg": 277.41,
+        "wind_speed_mps": 15.85,
+        "advection": {
+          "east_mps": 15.7177,
+          "north_mps": -2.0442
+        },
+        "wind_source": "GOES Derived Motion Winds (25 quality vectors)",
+        "texture": "cloud-mid-latest.png"
+      },
+      {
+        "name": "high",
+        "height_range_m": [
+          6500.0,
+          21000.0
+        ],
+        "projection_height_m": 10000.0,
+        "wind_from_deg": 282.05,
+        "wind_speed_mps": 15.3819,
+        "advection": {
+          "east_mps": 15.0429,
+          "north_mps": -3.2112
+        },
+        "wind_source": "GOES Derived Motion Winds (93 quality vectors)",
+        "texture": "cloud-high-latest.png"
+      }
+    ],
+    "advance": "continuous monotonic time; never reset at asset boundary",
+    "composite_order": [
+      "high",
+      "mid",
+      "low"
+    ]
+  },
+  "ocean": {
+    "significant_wave_height_m": 0.6,
+    "dominant_period_s": 6.0,
+    "dominant_wavelength_m": 56.188,
+    "wave_from_deg": 85.0,
+    "phase_velocity_mps": 9.365,
+    "components": [
+      {
+        "name": "swell",
+        "height_m": 0.1,
+        "period_s": 10.0,
+        "wavelength_m": 156.078,
+        "wave_from_deg": 112.5,
+        "source": "NDBC 44098 spectral partition observation"
+      },
+      {
+        "name": "wind_wave",
+        "height_m": 0.6,
+        "period_s": 5.6,
+        "wavelength_m": 48.946,
+        "wave_from_deg": 90.0,
+        "source": "NDBC 44098 spectral partition observation"
+      }
+    ],
+    "wind_from_deg": 150,
+    "wind_knots": 10.5,
+    "tide_phase": "flooding",
+    "shore_interaction": "registered water mask + signed shore distance; foam only on incoming faces",
+    "advance": "continuous spectral phase; no finite loop"
+  },
+  "sun": {
+    "altitude_deg": -28.4,
+    "azimuth_deg": 305.5,
+    "off_screen": true,
+    "state": "night",
+    "visual_phase": "night"
+  },
+  "moon": {
+    "altitude_deg": -8.5,
+    "azimuth_deg": 246.0,
+    "illumination": 0.243,
+    "visible": false
+  },
+  "sources": {
+    "conditions": "/home/runner/work/luminary/luminary/tmp/york-live/display-state.json",
+    "cloud_manifest": "/home/runner/work/luminary/luminary/tmp/york-live/goes-clouds/goes-cloud-plane.json",
+    "cloud_provider": "NOAA GOES-19 ABI L2 CMIPF channel 13 plus ABI L2 ACHA cloud-top height"
+  }
+}
