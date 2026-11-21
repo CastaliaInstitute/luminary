@@ -1,0 +1,48 @@
+{
+  "schema": "luminary-runtime-bundle/v1",
+  "bundle_id": "a9e5629a7bad517b21c8",
+  "updated_at": "2026-11-21T17:59:46.914519Z",
+  "camera": {
+    "width_px": 1024,
+    "height_px": 600,
+    "horizon_y_px": 291
+  },
+  "assets": {
+    "cloud_high": {
+      "path": "cloud-high-a9e5629a7bad517b21c8.bin",
+      "bytes": 595968,
+      "crc32": "4f1ce45c",
+      "sha256": "3c2c1acc661167443c8369677f5fb437461d5fa8be5b7a6d5c9bcc6b5c796513"
+    },
+    "cloud_mid": {
+      "path": "cloud-mid-a9e5629a7bad517b21c8.bin",
+      "bytes": 595968,
+      "crc32": "07ae76b4",
+      "sha256": "5b5c4ea79ec23fca6241b9b662f18bab074d7cd291aaa0426cbf89b5bc9a2130"
+    },
+    "cloud_low": {
+      "path": "cloud-low-a9e5629a7bad517b21c8.bin",
+      "bytes": 595968,
+      "crc32": "d79e9a14",
+      "sha256": "addbf2e46d71b1d8bcf005ee4e725fe29fb10816f55cff65063fc2058c6758b8"
+    },
+    "ocean_phase": {
+      "path": "ocean-phase-a9e5629a7bad517b21c8.bin",
+      "bytes": 460800,
+      "crc32": "0cf06a67",
+      "sha256": "ffa54146fefa93e16ba7b2781c3cd0bc988344eb263154bdc3d8d1336bfee978"
+    },
+    "wave_cycle": {
+      "path": "wave-cycle-a9e5629a7bad517b21c8.bin",
+      "bytes": 7159550,
+      "crc32": "b14cf6da",
+      "sha256": "217938bf78557c0e876dfdeb470287eb34f787eaa1b0d3b31e50ca06510ca0f2"
+    },
+    "state": {
+      "path": "state-a9e5629a7bad517b21c8.json",
+      "bytes": 3309,
+      "crc32": "c2b36f55",
+      "sha256": "41e9c80bee0102522ea5a3cbad1a879b9498ff2201faf2c69661d00b4d7b387c"
+    }
+  }
+}
